@@ -33,6 +33,7 @@ Everything is live-updating and interactive, so you can change anything at any t
 * Add a horizontal line to call attention to a critical event
 
 ##Coming soon
+* A better name
 * Download interactive widgets as html files for easy sharing
 * Support for merging datasets automatically
 * Add annotations to graphs
