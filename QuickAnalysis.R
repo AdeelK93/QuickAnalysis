@@ -25,7 +25,6 @@ import <- function(fileschosen) { #can import both csv and excel files
                         })
   files <- suppressMessages(left_join(files,filenames))
   files$Filename <- as.factor(files$Filename)
-  colnames(files) <- make.names(colnames(files))
   files
 }
 
@@ -46,7 +45,7 @@ import.single <- function(filename,filepath) { #worker function
   charcount <- suppressWarnings(apply(imported[1:mincol,],1,function(x) sum(is.na(x==as.numeric(x))-is.na(x))))
   datacount <- suppressWarnings(apply(imported[1:mincol,],1,function(x) sum(!is.na(x))))
   headrow <- which.min(abs(charcount-median(datacount)))
-  colnames(imported) <- imported[headrow,]
+  colnames(imported) <- make.names(imported[headrow,])
   imported <- imported[(headrow+1):nrow(imported),]
   imported <- imported[,colSums(is.na(imported))<(nrow(imported)/3)] #remove empty columns
   imported <- imported[rowSums(is.na(imported))<(ncol(imported)/3),] #remove empty rows
@@ -74,7 +73,7 @@ bigXL <- function(xl){
     charcount <- suppressWarnings(apply(imported[1:50,],1,function(x) sum(is.na(x==as.numeric(x))-is.na(x))))
     datacount <- suppressWarnings(apply(imported[1:50,],1,function(x) sum(!is.na(x))))
     headrow <- which.min(abs(charcount-median(datacount)))
-    colnames(imported) <- imported[headrow,]
+    colnames(imported) <- make.names(imported[headrow,])
     imported <- imported[(headrow+1):nrow(imported),]
     imported$Filename <- filename
     imported <- imported[,colSums(is.na(imported))<(nrow(imported)/3)] #remove empty columns
