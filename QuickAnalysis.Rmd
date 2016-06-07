@@ -1,0 +1,738 @@
+---
+title: "Quick Analysis Example"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    theme: paper
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(Cairo)
+options(shiny.usecairo=T)
+library(dygraphs)
+library(rhandsontable)
+suppressMessages(library(DT))
+source('QuickAnalysis.R')
+```
+
+Import {data-orientation=columns}
+=====================================
+
+Column {.sidebar}
+-----------------------------------------------------------------------
+
+An example for importing data and making plots  
+  
+```{r Sidebar}
+options(shiny.maxRequestSize=30*1024^2) #30 mb limit
+fileInput(
+  'fileschosen',
+  'Accepted formats: csv, xls, xlsx (any combination)',
+  multiple = T,
+  accept = c('.csv', '.xls', '.xlsx')
+  )
+imported.orig <- reactive({
+  validate(need(!is.null(input$fileschosen),F))
+  x <- tryCatch(import(input$fileschosen),error=function(e) NULL)
+  validate(need(x,"add more descriptive error messages here"))
+  x
+})
+```
+
+* For excel files with multiple sheets, only sheets with the max number of columns will be imported
+* Reporting time data in seconds is preferred over H:M:S  
+* You can download the merged dataset as a zipped csv below:
+
+```{r Download}
+output$download <- downloadHandler(paste('data-', Sys.Date(), '.zip', sep=''),
+   content = function(file) if(!is.null(imported())) {
+     setwd(tempdir())
+     names <- paste0(levels(as.factor(imported()$Battery.ID)),".csv")
+     #split up the data by ID and reduce file size
+     spl <- lapply(split(imported(),imported()$Battery.ID),
+                   function(x) select(x,-Battery.ID,-Type,-Filename,
+                                      -TimeHr,-TimeMin,-StepTimeHr,-StepTimeMin))
+     mapply(write_csv,spl,names)
+     tryCatch(zip(zipfile=file, files=names),warning=function(e) zip(zipfile=file, files=names,
+              zip = "C:/Program Files/Rtools/bin/zip"))
+   },
+   contentType = "application/zip"
+)
+fluidPage(downloadButton('download', 'Download csv'))
+```
+
+Column {data-width=400 .tabset}
+-------------------------------------
+
+###Choose variables
+```{r vars.input}
+#remove text columns
+graphnames.orig <- reactive(colnames(imported.orig()[sapply(imported.orig(), is.numeric)]))
+output$voltage <- renderUI({ 
+  selectInput("voltage","Voltage:",graphnames.orig(),
+            agrep.best("Voltage",colnames(imported.orig())),T)
+})
+voltage.sorted <- reactive(if(!is.null(imported.orig())) {
+  #rowMeans=merging columns in a moderately efficient way
+  #rowSums can't handle 0s well
+  rowMeans(imported.orig()[input$voltage],na.rm=T)
+})
+output$current <- renderUI({ 
+  selectInput("current","Current:",graphnames.orig(),
+            agrep.best("Current",colnames(imported.orig())),T)
+})
+current.sorted <- reactive(if(!is.null(imported.orig())) {
+  rowMeans(imported.orig()[input$current],na.rm=T)
+})
+output$amphours <- renderUI({ 
+  selectInput("amphours","Capacity (Amp-hours):",graphnames.orig(),
+            agrep.best("Amp.Hours",colnames(imported.orig())),T)
+})
+amphours.sorted <- reactive(if(!is.null(imported.orig())) {
+  rowMeans(imported.orig()[input$amphours],na.rm=T)
+})
+output$totaltime <- renderUI({ 
+  selectInput("totaltime","Total elapsed time:",graphnames.orig(),
+            agrep.best("Total.Time",colnames(imported.orig())),T)
+})
+totaltime.sorted <- reactive(if(!is.null(imported.orig())) {
+  x <- rowMeans(imported.orig()[input$totaltime],na.rm=T)
+  if(min(x[x>0],na.rm=T)<0.05) { #time in days?
+    x <- unlist(tapply(x,imported.orig()$Filename,function(x) {
+      #only modify files with time reporting in days
+      if(min(x[x>0],na.rm=T)<0.01) x*24*3600
+      else x
+    }))
+  }
+  x
+})
+output$steptime <- renderUI({ 
+  selectInput("steptime","Step time:",graphnames.orig(),
+            agrep.best("Step.Time",colnames(imported.orig())),T)
+})
+steptime.sorted <- reactive(if(!is.null(imported.orig())) {
+  x <- rowMeans(imported.orig()[input$steptime],na.rm=T)
+  if(min(x[x>0],na.rm=T)<0.05) { #time in days?
+    x <- unlist(tapply(x,imported.orig()$Filename,function(x) {
+      #only modify files with time reporting in days
+      if(min(x[x>0],na.rm=T)<0.01) x*24*3600
+      else x
+    }))
+  }
+  x
+})
+output$step <- renderUI({ 
+  selectInput("step","Step index:",graphnames.orig(),
+            agrep.best("Step",colnames(imported.orig())),T)
+})
+step.sorted <- reactive(if(!is.null(imported.orig())) {
+  rowMeans(imported.orig()[input$step],na.rm=T)
+})
+output$cycle <- renderUI({ 
+  selectInput("cycle","Cycle counter:",graphnames.orig(),
+            agrep.best("Cycle",colnames(imported.orig())),T)
+})
+cycle.sorted <- reactive(if(!is.null(imported.orig())) {
+  rowMeans(imported.orig()[input$cycle],na.rm=T)
+})
+
+incomplete <- reactive({if(is.null(imported())) return(NULL)
+  #count the number of missing values, for heatmap and diagnostics
+  sum(sapply(imported()[c("Battery.ID",stdnames)], function(x) sum(is.na(x))))})
+```
+
+```{r import.vars}
+fluidPage(column(12,div(style = "height:70px;",
+  htmlOutput("voltage"),
+  htmlOutput("current"),
+  htmlOutput("amphours"),
+  htmlOutput("totaltime"),
+  htmlOutput("steptime"),
+  htmlOutput("step"),
+  htmlOutput("cycle"),
+  renderText(if(!is.null(imported())) paste("If your dataset has different column names between files, you must select all applicable columns above.",incomplete(),
+              "missing values found, see heatmap for more details."))
+)))
+
+imported.sorted <- reactive({
+  if(is.null(imported.orig())) return(NULL)
+  x <- imported.orig()[setdiff(colnames(imported.orig()),c(
+    input$voltage,input$current,input$amphours,input$totaltime,
+    input$steptime,input$step,input$cycle))] #drop columns
+  x <- data.frame(Voltage=voltage.sorted(),Current=current.sorted(),
+                  Amp.Hours=amphours.sorted(),Total.Time=totaltime.sorted(),
+                  Step.Time=steptime.sorted(),Step=step.sorted(),
+                  Cycle=cycle.sorted(),x)
+  x <- mutate(x, #add time data
+    TimeMin=Total.Time/60, TimeHr=Total.Time/3600,
+    StepTimeMin=Step.Time/60, StepTimeHr=Step.Time/3600
+    )
+  tryCatch(calculaterechargefactor(x),error=function(e) x)
+})
+imported <- reactive({
+  if(is.null(imported.sorted())) return(NULL)
+  x <- select(imported.sorted(), -Type, -Battery.ID)
+  x <- suppressMessages(left_join(x,labs()))
+  mutate(x, Type=as.factor(Type),Battery.ID=as.factor(Battery.ID))
+})
+```
+
+###Heatmap
+Heatmap shows where missing values are concentrated (if applicable)
+```{r heatmap}
+output$heatmap <- renderPlotly(if(!is.null(imported())){
+  tryCatch(ggplotly({
+    heat <- aggregate(imported()[stdnames],list(imported()$Battery.ID),function(x) sum(is.na(x)))
+    heat <- suppressMessages(melt(heat))
+    colnames(heat) <- c("Battery.ID","Column","Missing.Values")
+    ggplot(heat,aes(Column,Battery.ID,fill=Missing.Values)) + 
+      geom_tile()+scale_fill_continuous(low="gray95",high="firebrick") + 
+      theme_minimal() + theme(axis.text.x = element_text(angle = 30,
+        hjust = 1),legend.position="none")+ylab(" ")+xlab(" ")
+  }) %>% config(displayModeBar = F),error=function(e) ggplotly(ggplot()))
+})
+plotlyOutput("heatmap")
+#renderText(if(identical(incomplete(),0)) return("No missing values remain! All data has been accounted for."))
+```
+
+###Diagnostic
+Summary of imported data:
+```{r diagnostic}
+renderPrint(summary(imported()))
+```
+
+Column {data-width=600}
+-------------------------------------
+
+###Label Table
+```{r labeltable}
+values <- reactiveValues(labels=NULL)
+observeEvent(imported.orig(), {
+  values$labels <- data.frame(Filename=imported.orig()$Filename,
+                              Type=as.character(imported.orig()$Type),
+                              Battery.ID=as.character(imported.orig()$Battery.ID),
+                              stringsAsFactors=F)[!duplicated(imported.orig()$Filename),]
+})
+output$labels.hot <- renderRHandsontable(if(!is.null(values$labels)){
+  rhandsontable(values$labels, contextMenu=F, maxRows=length(unique(imported.orig()$Filename)),
+                rowHeaders = NULL, stretchH = "all") %>%
+    hot_col("Filename", readOnly = T)
+})
+rHandsontableOutput("labels.hot")
+labs <- reactive({
+  if(!is.null(input$labels.hot)) hot_to_r(input$labels.hot)
+  else values$labels
+})
+```
+
+###Customize Colors
+Hex colors or any of [these named colors](http://www.stat.columbia.edu/~tzheng/files/Rcolor.pdf).
+```{r colortable}
+values <- reactiveValues(colors=NULL)
+observeEvent(labs(), {
+  values$colors <- data.frame(Type=sort(unique(labs()$Type)),
+    Color=rainbow_hcl(length(unique(labs()$Type)),70), stringsAsFactors=F)
+})
+observeEvent(imported.orig(), {
+  values$colors <- data.frame(Type=sort(unique(labs()$Type)),
+    Color=rainbow_hcl(length(unique(labs()$Type)),70), stringsAsFactors=F)
+})
+output$colors.hot <- renderRHandsontable(if(!is.null(values$colors)){
+  rhandsontable(values$colors, contextMenu=F, maxRows=length(unique(labs()$Type)),
+                rowHeaders = NULL) %>%
+    hot_col("Type", readOnly = T)
+})
+rHandsontableOutput("colors.hot")
+cols <- reactive({
+  if(!is.null(input$colors.hot)) hot_to_r(input$colors.hot)
+  else values$colors
+})
+cols.cast <- reactive({
+  if(!is.null(cols())){
+    suppressMessages(arrange(left_join(labs(),cols()),Battery.ID))
+  }
+})
+```
+
+Explore {data-orientation=rows data-navmenu="Continuous"}
+=====================================
+
+Column {.sidebar}
+-----------------------------------------------------------------------
+  
+Select continuous variables for graphing  
+  
+```{r xy.graph}
+graphnames <- reactive(if(!is.null(imported())) colnames(imported()[sapply(imported(),
+                                                                                is.numeric)]))
+timeunits <- reactive(if(!is.null(imported.sorted())) {
+  x <- max(imported.sorted()$Total.Time, na.rm = T)
+  if(x<300) return("Total.Time") #under 5 minutes -> seconds
+  else if(x<7200) return("TimeMin") #under 2 hours -> minutes
+  else return("TimeHr") #hours
+})
+output$xy.cycle <- renderUI({ 
+sliderInput("xy.cycle","Is there a cycle to isolate? (0 for no)",0,
+            tryCatch(max(imported.sorted()$Cycle),
+            error=function(e) 1),0,1,T)
+  })
+imported.xy <- reactive(if(!is.null(imported())) {
+  if(is.null(input$xy.cycle)) return(imported())
+  else if(input$xy.cycle==0) return(imported())
+  else {
+    imported()[imported()$Cycle==input$xy.cycle,] %>%
+    within({Total.Time <- ave(Total.Time, Battery.ID, FUN=function(x) x-min(x))}) %>%
+    mutate(TimeHr=Total.Time/3600,TimeMin=Total.Time/60)
+    }
+})
+
+output$top.yn <- renderUI({ 
+selectInput("top.yn","Top y-axis:",graphnames(),"Current")
+  })
+output$bottom.yn <- renderUI({ 
+selectInput("bottom.yn","Bottom y-axis:",graphnames(),"Voltage")
+  })
+output$bottom.xn <- renderUI({ 
+selectInput("bottom.xn","Common x-axis:",graphnames(),timeunits())
+  })
+
+fluidPage(
+  htmlOutput("top.yn"),
+  htmlOutput("bottom.yn"),
+  htmlOutput("bottom.xn"),
+  htmlOutput("xy.cycle"),
+  textOutput("legendDivID")
+)
+```
+
+Row
+-----------------------------------------------------------------------
+### Top Graph
+```{r top.graph}
+renderDygraph(withProgress(message="Rendering plot...",
+                          dygraph.cast(imported.xy(),input$bottom.xn,input$top.yn,
+                          input$bottom.xn,input$top.yn,cols.cast()$Color,group="brc")))
+```
+
+Row
+-----------------------------------------------------------------------
+### Bottom Graph
+```{r bottom.graph}
+renderDygraph(withProgress(message="Rendering plot...",
+                           dygraph.cast(imported.xy(),input$bottom.xn,input$bottom.yn,
+                           input$bottom.xn,input$bottom.yn,cols.cast()$Color,group="brc")))
+```
+
+Share {data-orientation=columns data-navmenu="Continuous"}
+=====================================
+
+Column {data-width=300 .tabset}
+-------------------------------------
+    
+### Choose options
+Customize continuous variable chart for sharing:
+```{r xypublish.options}
+fluidPage(
+  checkboxInput("xypub.both","Include bottom graph (not yet working)"),
+  selectInput("xypub.theme","Graph theme:",c("Default","Minimal","Grayscale")),
+  selectInput("xypub.legend","Legend position:",c("None","Side"="right","Above"="top",
+              "Below"="bottom","Top-left"="c(0,1)","Top-right"="c(1,1)",
+              "Bottom-left"="c(0,0)","Bottom-right"="c(1,0)")),
+  sliderInput("xypub.fsize","Font size:",10,20,12,0.5),
+  textInput("xypub.title","Chart title:",""),
+  helpText("Download chart options:"),
+  splitLayout(
+    textInput("xypub.savew","Width:","12"),
+    textInput("xypub.saveh","Height:","8"),
+    downloadButton("xypub.png","PNG"),
+    downloadButton("xypub.svg","SVG")
+  )
+)
+#linesize?
+```
+
+###Additional Options
+Customize continuous variable chart for sharing:
+```{r xypublish.options2}
+fluidPage(
+  helpText("Include axis ranges:"),
+  splitLayout(
+    textInput("xypub.x1","X start:"),
+    textInput("xypub.x2","X end:")
+  ),
+  splitLayout(
+    textInput("xypub.y1","Y1 start:"),
+    textInput("xypub.y2","Y1 end:")
+  ),
+  splitLayout(
+    textInput("xypub.y1b","Y2 start:"),
+    textInput("xypub.y2b","Y2 end:")
+  ),
+  helpText("Horizontal line options:"),
+  splitLayout(
+    textInput("xyhline.col","Color:","None"),
+    textInput("xyhline.val","Position:","0"),
+    textInput("xyhline.size","Size:","0.8")
+  )
+)
+```
+
+Column {data-width=700}
+-------------------------------------
+
+### Graph
+```{r xypublish.graph}
+xyline1 <- reactive(if(!is.null(imported.xy())) {
+  linegraph(imported.xy(),input$bottom.xn,input$top.yn) + 
+    scale_color_manual(values=cols.cast()$Color,name="")
+})
+xyline2 <- reactive(if(!is.null(imported.xy())) {
+  linegraph(imported.xy(),input$bottom.xn,input$bottom.yn) + 
+    scale_color_manual(values=cols.cast()$Color,name="")
+})
+renderPlot(withProgress(message="Rendering...",xypub.graph()))
+xypub.graph <- reactive(if(!is.null(imported.xy())) {
+  xypub.y1 <- as.numeric(input$xypub.y1) #these are the x-y ranges
+  xypub.y2 <- as.numeric(input$xypub.y2)
+  xypub.y1b <- as.numeric(input$xypub.y1b)
+  xypub.y2b <- as.numeric(input$xypub.y2b)
+  xypub.x1 <- as.numeric(input$xypub.x1)
+  xypub.x2 <- as.numeric(input$xypub.x2)
+  
+  if(!is.na(xypub.y1) & !is.na(xypub.y2) & !is.na(xypub.x1) & !is.na(xypub.x2)) {
+    gg <- xyline1() + coord_cartesian(xlim=c(xypub.x1,xypub.x2),ylim=c(xypub.y1,xypub.y2))
+  } else gg <- xyline1()
+  if(input$xypub.both){
+    if(!is.na(xypub.y1b) & !is.na(xypub.y2b) & !is.na(xypub.x1) & !is.na(xypub.x2)) {
+      gg2 <- xyline2() + coord_cartesian(xlim=c(xypub.x1,xypub.x2),ylim=c(xypub.y1b,xypub.y2b))
+    } else gg2 <- xyline2()
+    
+  }
+      
+  
+  if(input$xyhline.col!="None" & input$xyhline.col!="none" & nchar(input$xyhline.col)){
+    gg <- gg + geom_hline(aes_(yintercept=as.numeric(input$xyhline.val)),linetype=2,
+                          color=input$xyhline.col,size=as.numeric(input$xyhline.size))
+  }
+  if(input$xypub.theme=="Default") gg <- gg + theme_gray(base_size=input$xypub.fsize)
+  if(input$xypub.theme=="Minimal") gg <- gg + theme_bw(base_size=input$xypub.fsize)
+  if(input$xypub.theme=="Grayscale") gg <- gg + theme_pub(base_size=input$xypub.fsize) +
+      scale_fill_grey(start=0,end=.9,name="") + scale_color_grey(start=0,end=.9,name="")
+  
+  if(!length(grep(",",input$xypub.legend))) gg <- gg + theme(legend.position=input$xypub.legend,
+                                                           legend.title=element_blank())
+  else gg <- gg + theme(legend.position=eval(parse(text=input$xypub.legend)),
+                        legend.justification=eval(parse(text=input$xypub.legend)),
+                        legend.title=element_blank())
+  if(nchar(input$xypub.title)) gg <- gg + ggtitle(input$xypub.title)
+  gg
+})
+output$xypub.png <- downloadHandler(paste('plot-', Sys.Date(), '.png', sep=''),
+   content = function(file) if(!is.null(imported.xy())) {
+     ggsave(file,device="png",width=as.numeric(input$xypub.savew),
+            height=as.numeric(input$xypub.saveh))
+   }
+)
+output$xypub.svg <- downloadHandler(paste('plot-', Sys.Date(), '.svg', sep=''),
+   content = function(file) if(!is.null(imported.xy())) {
+     ggsave(file,device="svg",width=as.numeric(input$xypub.savew),
+            height=as.numeric(input$xypub.saveh))
+   }
+)
+```
+
+Explore {data-orientation=columns data-navmenu="Discrete"}
+=====================================
+
+Column {data-width=300 .tabset}
+-------------------------------------
+    
+### Choose options
+Select discrete variables for graphing, eg: When Voltage is 6, what is Time?  
+Use the 'filter' tab to further narrow down your dataset.  
+  
+```{r options}
+output$varnames.yn <- renderUI({ 
+  selectInput("options.yn","Name of the known variable:",graphnames())
+  })
+output$varnames.xn <- renderUI({ 
+  selectInput("options.xn","Name of the unknown variable:",graphnames())
+  })
+
+fluidPage(
+  htmlOutput("varnames.yn"),
+  textInput("options.yv","Value of the known variable: (numeric, or type min/max)"),
+  htmlOutput("varnames.xn"),
+  checkboxInput("avg","Calculate average/SEM by type"),
+  textInput("options.name","Name for this new variable:","Variable")
+)
+```
+  
+```{r calculating}
+reduced <- reactive(if(!is.null(imported.filtered())){
+  if(!nchar(input$options.yn) | !nchar(input$options.yv) | !nchar(input$options.xn) | !nchar(input$options.name)) return(NULL)
+  options.data <- imported.filtered()
+  options.name.orig <<- input$options.name
+  options.name <<- make.names(input$options.name)
+  options.data <- tryCatch(reducer(options.data,options.name,
+          input$options.yn,input$options.yv,input$options.xn),
+          error=function(e) NULL)
+  if(input$avg & !is.null(options.data)) return(avgsem(options.data))
+  options.data
+})
+
+wide <- reactive({
+  if("Battery.ID" %in% colnames(reduced())){
+    return(dcast(reduced(), Cycle~Battery.ID,mean,value.var=options.name))
+  } else{
+    casted <- dcast(reduced(), Cycle~Type,mean,value.var=options.name)
+    casted.sem <- dcast(reduced(),Cycle~Type,mean,
+                        value.var=paste0(options.name,".SEM"))
+    cnames.orig <- c(colnames(casted),
+                     paste0(colnames(casted.sem[2:ncol(casted)]),".SEM"))
+    #this is some shiny bug
+    casted <- cbind(casted,casted.sem[,2:ncol(casted)])
+    colnames(casted) <- cnames.orig
+    return(casted)
+  }
+})
+```
+
+###Filter
+```{r filter}
+filter.min <- reactive({if(is.null(imported.sorted())) return(rep(NaN,5))
+  sapply(imported.sorted()[stdnames],min)
+})
+filter.max <- reactive({if(is.null(imported.sorted())) return(rep(NaN,5))
+  sapply(imported.sorted()[stdnames],max)
+})
+output$filter.voltage <- renderUI({ 
+  sliderInput("filter.voltage","Select a voltage range:",filter.min()[1],filter.max()[1],
+            c(filter.min()[1],filter.max()[1]),0.1)
+  })
+output$filter.current <- renderUI({ 
+  sliderInput("filter.current","Select a current range:",filter.min()[2],filter.max()[2],
+            c(filter.min()[2],filter.max()[2]),0.1)
+  })
+output$filter.amphours <- renderUI({ 
+  sliderInput("filter.amphours","Select a capacity range:",filter.min()[3],filter.max()[3],
+            c(filter.min()[3],filter.max()[3]),0.1)
+  })
+output$filter.totaltime <- renderUI({ 
+  sliderInput("filter.totaltime","Select a total time range:",filter.min()[4],filter.max()[4],
+            c(filter.min()[4],filter.max()[4]),1)
+  })
+output$filter.steptime <- renderUI({ 
+  sliderInput("filter.steptime","Select a step time range:",filter.min()[5],filter.max()[5],
+            c(filter.min()[5],filter.max()[5]),1)
+  })
+output$filter.step <- renderUI({ 
+  sliderInput("filter.step","Is there a step to isolate? (0 for no)",0,
+            tryCatch(max(imported.sorted()$Step[imported.sorted()$Step<=ceiling(quantile(
+              imported.sorted()$Step,.99))]),error=function(e) 1),0,1)
+})
+
+fluidPage(column(12,div(style = "height:80px;",
+        htmlOutput("filter.voltage"),
+        htmlOutput("filter.current"),
+        htmlOutput("filter.amphours"),
+        htmlOutput("filter.totaltime"),
+        htmlOutput("filter.steptime"),
+        htmlOutput("filter.step")
+)))
+
+imported.filtered <- reactive(if(!is.null(imported())){
+  if(is.null(input$filter.step)) return(imported())
+  x <- imported()
+  if(input$filter.step) x <- filter(imported(),Step==input$filter.step)
+  tryCatch(filter(x,
+         Voltage>=input$filter.voltage[1],Voltage<=input$filter.voltage[2],
+         Current>=input$filter.current[1],Current<=input$filter.current[2],
+         Amp.Hours>=input$filter.amphours[1],Amp.Hours<=input$filter.amphours[2],
+         Total.Time>=input$filter.totaltime[1],Total.Time<=input$filter.totaltime[2],
+         Step.Time>=input$filter.steptime[1],Step.Time<=input$filter.steptime[2]
+         ),error=function(e) imported())
+})
+```
+
+
+###Protocol
+Best attempt at deriving protocol from dataset. If there is a mismatch in step numbers, you may be able to isolate what you need using the 'filter' tab.  
+  
+```{r protocol}
+output$protocol.ids <- renderUI({ 
+  selectInput("protocol.ids","Filter prediction by Battery ID:",
+              c("All",unique(imported()$Battery.ID)))
+  })
+fluidPage(
+  htmlOutput("protocol.ids"),
+  renderTable(if(!is.null(imported.sorted())){
+    if(input$protocol.ids=="All") Protocol(imported())
+    else Protocol(filter(imported(),Battery.ID==input$protocol.ids))
+  },include.rownames=F)
+)
+```
+
+
+Column {data-width=700 .tabset}
+-------------------------------------
+
+### Graph
+```{r graph}
+#ticker<-function(x) paste0("`",x,"`")
+bar <- reactive(if(!is.null(reduced())) bargraph(reduced(),options.name,
+        options.name.orig)+scale_fill_manual(values=cols()$Color,name=""))
+line <- reactive(if(!is.null(reduced())) dygraph.cast(reduced(),
+        "Cycle",options.name,"Cycle",options.name.orig,
+        cols.cast()$Color,cols()$Color))
+ggline <- reactive(if(!is.null(reduced())) {
+  gg <- linegraph(reduced(),"Cycle",options.name)+ylab(options.name.orig) +
+    scale_fill_manual(values=cols()$Color,name="")
+  if(input$avg) gg <- gg + scale_color_manual(values=cols()$Color,name="") #avg/sem
+  else gg <- gg + scale_color_manual(values=cols.cast()$Color,name="") #regular
+  gg
+})
+
+shinyApp(
+  ui = fluidPage(
+    radioButtons("graphtype",NULL,c("Line"=2,"Bar"=1),inline=T),
+    conditionalPanel(
+        condition = "input.graphtype==1", plotlyOutput("bar")         
+      ),
+      conditionalPanel(
+        condition = "input.graphtype==2", dygraphOutput("line"),
+        tags$br(),
+        textOutput("legendDivID")
+      )
+  ),
+  server = function(input, output, session){
+    output$bar <- renderPlotly(withProgress(message="Calculating...",tryCatch(ggplotly(bar()) %>%
+          config(displayModeBar = F),error=function(e) ggplotly(ggplot()))))
+    output$line <- renderDygraph(withProgress(message="Calculating...",line()))
+  }
+)
+```
+
+### Table 
+```{r table}
+radioButtons("tabletype",NULL,c("Long","Wide"),inline=T)
+red.table <- reactive({
+  if(input$tabletype=="Long") return(reduced())
+  if(input$tabletype=="Wide") return(wide())
+})
+
+renderDataTable(datatable(red.table(),
+  filter = 'top', rownames = F,extensions = 'Buttons',fillContainer = F,
+  options = list(
+    scrollX = TRUE, scrollY = TRUE, fixedColumns = TRUE,
+    pageLength = 10, dom = 'Blftip',buttons = list('copy', 'csv'))),
+  server=F)
+```
+
+Share {data-orientation=columns data-navmenu="Discrete"}
+=====================================
+
+Column {data-width=300 .tabset}
+-------------------------------------
+    
+### Choose options
+Customize discrete variable chart for sharing:
+```{r publish.options}
+fluidPage(
+  radioButtons("pub.type",NULL,c("Line","Bar"),inline=T),
+  selectInput("pub.theme","Graph theme:",c("Default","Minimal","Grayscale")),
+  selectInput("pub.legend","Legend position:",c("None","Side"="right","Above"="top",
+              "Below"="bottom","Top-left"="c(0,1)","Top-right"="c(1,1)",
+              "Bottom-left"="c(0,0)","Bottom-right"="c(1,0)")),
+  sliderInput("pub.fsize","Font size:",10,20,12,0.5),
+  textInput("pub.title","Chart title:",""),
+  helpText("Download chart options:"),
+  splitLayout(
+    textInput("pub.savew","Width:","12"),
+    textInput("pub.saveh","Height:","8"),
+    downloadButton("pub.png","PNG"),
+    downloadButton("pub.svg","SVG")
+  )
+)
+#linesize?
+```
+
+###Additional Options
+Customize discrete variable chart for sharing:
+```{r publish.options2}
+fluidPage(
+  helpText("Include axis ranges:"),
+  splitLayout(
+    textInput("pub.x1","X start:"),
+    textInput("pub.x2","X end:")
+  ),
+  splitLayout(
+    textInput("pub.y1","Y start:"),
+    textInput("pub.y2","Y end:")
+  ),
+  helpText("Horizontal line options:"),
+  splitLayout(
+    textInput("hline.col","Color:","None"),
+    textInput("hline.val","Position:","0"),
+    textInput("hline.size","Size:","0.8")
+  ),
+  checkboxInput("pub.rotatex","Rotate x-axis labels")
+)
+```
+
+Column {data-width=700}
+-------------------------------------
+
+### Graph
+```{r publish.graph}
+renderPlot(withProgress(message="Rendering...",pub.graph()))
+pub.graph <- reactive(if(!is.null(reduced())) {
+  pub.y1 <- as.numeric(input$pub.y1) #these are the x-y ranges
+  pub.y2 <- as.numeric(input$pub.y2)
+  pub.x1 <- as.numeric(input$pub.x1)
+  pub.x2 <- as.numeric(input$pub.x2)
+  
+  if(input$pub.type=="Bar"){
+    if(!is.na(pub.y1) & !is.na(pub.y2)){
+      gg <- bar() + coord_cartesian(ylim=c(pub.y1,pub.y2))
+    } else gg <- bar()
+  } 
+  else { #line
+    if(!is.na(pub.y1) & !is.na(pub.y2) & !is.na(pub.x1) & !is.na(pub.x2)){
+         gg <- ggline() + coord_cartesian(xlim=c(pub.x1,pub.x2),ylim=c(pub.y1,pub.y2))
+       } else gg <- ggline()
+  }
+  
+  if(input$hline.col!="None" & input$hline.col!="none" & nchar(input$hline.col)){
+    gg <- gg + geom_hline(aes_(yintercept=as.numeric(input$hline.val)),linetype=2,
+                          color=input$hline.col,size=as.numeric(input$hline.size))
+  }
+  if(input$pub.theme=="Default") gg <- gg + theme_gray(base_size=input$pub.fsize)
+  if(input$pub.theme=="Minimal") gg <- gg + theme_bw(base_size=input$pub.fsize)
+  if(input$pub.theme=="Grayscale") gg <- gg + theme_pub(base_size=input$pub.fsize) +
+      scale_fill_grey(start=0,end=.9,name="") + scale_color_grey(start=0,end=.9,name="")
+  
+  if(!length(grep(",",input$pub.legend))) gg <- gg + theme(legend.position=input$pub.legend,
+                                                           legend.title=element_blank())
+  else gg <- gg + theme(legend.position=eval(parse(text=input$pub.legend)),
+                        legend.justification=eval(parse(text=input$pub.legend)),
+                        legend.title=element_blank())
+  if(nchar(input$pub.title)) gg <- gg + ggtitle(input$pub.title)
+  if(input$pub.rotatex) gg <- gg + theme(axis.text.x = element_text(angle = 60, hjust = 1))
+  gg
+})
+output$pub.png <- downloadHandler(paste('plot-', Sys.Date(), '.png', sep=''),
+   content = function(file) if(!is.null(reduced())) {
+     ggsave(file,device="png",width=as.numeric(input$pub.savew),
+            height=as.numeric(input$pub.saveh))
+   }
+)
+output$pub.svg <- downloadHandler(paste('plot-', Sys.Date(), '.svg', sep=''),
+   content = function(file) if(!is.null(reduced())) {
+     ggsave(file,device="svg",width=as.numeric(input$pub.savew),
+            height=as.numeric(input$pub.saveh))
+   }
+)
+```
