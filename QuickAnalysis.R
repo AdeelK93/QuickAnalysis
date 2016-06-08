@@ -73,10 +73,10 @@ bigXL <- function(xl){ #worker function for big excel files
   xlfile <- xl
   sheets.orig <- excel_sheets(xl)
   if("Channel_Chart" %in% sheets.orig){ #arbin data, has weird xml structure
-    sheetnames <- sheets.orig[(grep("Channel",sheets.orig)[grep("Channel",sheets.orig)!=2])]
-    sheets.orig <- (grep("Channel",sheets.orig)[grep("Channel",sheets.orig)!=2])-1
+    sheetnames <- sheets.orig[(grep("Channel(?!_Chart)",sheets.orig,perl=T))]
+    sheets.orig <- grep("Channel(?!_Chart)",sheets.orig,perl=T)-1
     xl <- lapply(sheets.orig,read_excel,path=xl,col_names = F)
-  } else{
+  } else {
     xl <- lapply(sheets.orig,read_excel,path=xl,col_names = F)
     sheetnames <- excel_sheets(xlfile)[sapply(xl,ncol)==max(sapply(xl,ncol))]
     xl <- xl[sapply(xl,ncol)==max(sapply(xl,ncol))] #pick out the files with the most columns
