@@ -42,7 +42,7 @@ imported.orig <- reactive({
 ```
 
 * For excel files with multiple sheets, only sheets with the max number of columns will be imported
-* Reporting time data in seconds is preferred over H:M:S  
+* Data must have column names present in order to be successfully imported   
 * You can download the merged dataset as a zipped csv below:
 
 ```{r Download}
@@ -55,6 +55,7 @@ output$download <- downloadHandler(paste('data-', Sys.Date(), '.zip', sep=''),
                    function(x) select(x,-Battery.ID,-Type,-Filename,
                                       -TimeHr,-TimeMin,-StepTimeHr,-StepTimeMin))
      mapply(write_csv,spl,names)
+     #the warning is to deal with windows computers
      tryCatch(zip(zipfile=file, files=names),warning=function(e) zip(zipfile=file, files=names,
               zip = "C:/Program Files/Rtools/bin/zip"))
    },
@@ -171,7 +172,7 @@ imported.sorted <- reactive({
     )
   tryCatch(calculaterechargefactor(x),error=function(e) x)
 })
-imported <- reactive({
+imported <- reactive({ #this is the final sorted dataset to be used by analytical functions
   if(is.null(imported.sorted())) return(NULL)
   x <- select(imported.sorted(), -Type, -Battery.ID)
   x <- suppressMessages(left_join(x,labs()))
@@ -245,11 +246,11 @@ output$colors.hot <- renderRHandsontable(if(!is.null(values$colors)){
     hot_col("Type", readOnly = T)
 })
 rHandsontableOutput("colors.hot")
-cols <- reactive({
+cols <- reactive({ #this is the color data, by type
   if(!is.null(input$colors.hot)) hot_to_r(input$colors.hot)
   else values$colors
 })
-cols.cast <- reactive({
+cols.cast <- reactive({ #this is the color data, by ID
   if(!is.null(cols())){
     suppressMessages(arrange(left_join(labs(),cols()),Battery.ID))
   }
@@ -278,6 +279,8 @@ sliderInput("xy.cycle","Is there a cycle to isolate? (0 for no)",0,
             tryCatch(max(imported.sorted()$Cycle),
             error=function(e) 1),0,1,T)
   })
+#should add step selection here
+#this data is fed into the continuous variable graph
 imported.xy <- reactive(if(!is.null(imported())) {
   if(is.null(input$xy.cycle)) return(imported())
   else if(input$xy.cycle==0) return(imported())
@@ -335,7 +338,7 @@ Column {data-width=300 .tabset}
 Customize continuous variable chart for sharing:
 ```{r xypublish.options}
 fluidPage(
-  checkboxInput("xypub.both","Include bottom graph (not yet working)"),
+  #checkboxInput("xypub.both","Include bottom graph (not yet working)"),
   selectInput("xypub.theme","Graph theme:",c("Default","Minimal","Grayscale")),
   selectInput("xypub.legend","Legend position:",c("None","Side"="right","Above"="top",
               "Below"="bottom","Top-left"="c(0,1)","Top-right"="c(1,1)",
@@ -357,19 +360,22 @@ fluidPage(
 Customize continuous variable chart for sharing:
 ```{r xypublish.options2}
 fluidPage(
-  helpText("Include axis ranges:"),
+  helpText("X-axis options:"),
+  textInput("xypub.xlab","X-axis label:",""),
   splitLayout(
     textInput("xypub.x1","X start:"),
     textInput("xypub.x2","X end:")
   ),
+  helpText("Y-axis options:"),
+  textInput("xypub.ylab","Y-axis label:",""),
   splitLayout(
-    textInput("xypub.y1","Y1 start:"),
-    textInput("xypub.y2","Y1 end:")
+    textInput("xypub.y1","Y start:"),
+    textInput("xypub.y2","Y end:")
   ),
-  splitLayout(
-    textInput("xypub.y1b","Y2 start:"),
-    textInput("xypub.y2b","Y2 end:")
-  ),
+  #splitLayout(
+  #  textInput("xypub.y1b","Y2 start:"),
+  #  textInput("xypub.y2b","Y2 end:")
+  #),
   helpText("Horizontal line options:"),
   splitLayout(
     textInput("xyhline.col","Color:","None"),
@@ -396,20 +402,19 @@ renderPlot(withProgress(message="Rendering...",xypub.graph()))
 xypub.graph <- reactive(if(!is.null(imported.xy())) {
   xypub.y1 <- as.numeric(input$xypub.y1) #these are the x-y ranges
   xypub.y2 <- as.numeric(input$xypub.y2)
-  xypub.y1b <- as.numeric(input$xypub.y1b)
-  xypub.y2b <- as.numeric(input$xypub.y2b)
+  #xypub.y1b <- as.numeric(input$xypub.y1b)
+  #xypub.y2b <- as.numeric(input$xypub.y2b)
   xypub.x1 <- as.numeric(input$xypub.x1)
   xypub.x2 <- as.numeric(input$xypub.x2)
   
   if(!is.na(xypub.y1) & !is.na(xypub.y2) & !is.na(xypub.x1) & !is.na(xypub.x2)) {
     gg <- xyline1() + coord_cartesian(xlim=c(xypub.x1,xypub.x2),ylim=c(xypub.y1,xypub.y2))
   } else gg <- xyline1()
-  if(input$xypub.both){
-    if(!is.na(xypub.y1b) & !is.na(xypub.y2b) & !is.na(xypub.x1) & !is.na(xypub.x2)) {
-      gg2 <- xyline2() + coord_cartesian(xlim=c(xypub.x1,xypub.x2),ylim=c(xypub.y1b,xypub.y2b))
-    } else gg2 <- xyline2()
-    
-  }
+  #if(input$xypub.both){
+  #  if(!is.na(xypub.y1b) & !is.na(xypub.y2b) & !is.na(xypub.x1) & !is.na(xypub.x2)) {
+  #    gg2 <- xyline2() + coord_cartesian(xlim=c(xypub.x1,xypub.x2),ylim=c(xypub.y1b,xypub.y2b))
+  #  } else gg2 <- xyline2()
+  #}
       
   
   if(input$xyhline.col!="None" & input$xyhline.col!="none" & nchar(input$xyhline.col)){
@@ -427,6 +432,8 @@ xypub.graph <- reactive(if(!is.null(imported.xy())) {
                         legend.justification=eval(parse(text=input$xypub.legend)),
                         legend.title=element_blank())
   if(nchar(input$xypub.title)) gg <- gg + ggtitle(input$xypub.title)
+  if(nchar(input$xypub.ylab)) gg <- gg + ylab(input$xypub.ylab)
+  if(nchar(input$xypub.xlab)) gg <- gg + xlab(input$xypub.xlab)
   gg
 })
 output$xypub.png <- downloadHandler(paste('plot-', Sys.Date(), '.png', sep=''),
@@ -471,6 +478,7 @@ fluidPage(
 ```
   
 ```{r calculating}
+#this will calculatethe reduced dataset for discrete variable analysis
 reduced <- reactive(if(!is.null(imported.filtered())){
   if(!nchar(input$options.yn) | !nchar(input$options.yv) | !nchar(input$options.xn) | !nchar(input$options.name)) return(NULL)
   options.data <- imported.filtered()
@@ -502,6 +510,8 @@ wide <- reactive({
 
 ###Filter
 ```{r filter}
+#filter dataset for discrete variable analysis
+#filter min/max determine the bounds of the sliders
 filter.min <- reactive({if(is.null(imported.sorted())) return(rep(NaN,5))
   sapply(imported.sorted()[stdnames],min)
 })
@@ -543,6 +553,7 @@ fluidPage(column(12,div(style = "height:80px;",
         htmlOutput("filter.step")
 )))
 
+#will perform calculations on this filtered dataset
 imported.filtered <- reactive(if(!is.null(imported())){
   if(is.null(input$filter.step)) return(imported())
   x <- imported()
@@ -564,7 +575,7 @@ Best attempt at deriving protocol from dataset. If there is a mismatch in step n
 ```{r protocol}
 output$protocol.ids <- renderUI({ 
   selectInput("protocol.ids","Filter prediction by Battery ID:",
-              c("All",unique(imported()$Battery.ID)))
+              c("All",levels(imported()$Battery.ID)))
   })
 fluidPage(
   htmlOutput("protocol.ids"),

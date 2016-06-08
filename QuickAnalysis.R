@@ -12,10 +12,14 @@ stdnames <- c("Voltage","Current","Amp.Hours","Total.Time","Step.Time","Step","C
 
 import <- function(fileschosen) { #can import both csv and excel files
   if(is.null(fileschosen)) return(NULL)
+  #multithreaded import function to read all files
   files <- mapply(import.single,fileschosen$name,fileschosen$datapath,SIMPLIFY = F)
+  #merge all files that did not throw an exception
   files <- rbind.fill(files[!sapply(files, is.null)])
+  #extract type and ID information from file name
   filenames <- tryCatch(parsebatteryname(unique(files$Filename)),
                         error=function(e){
+                          #ok that didn't work, try something else
                           Filename <- unique(files$Filename)
                           Battery.ID <- gsub(".xls?x*","",Filename)
                           Battery.ID <- gsub(".csv","",Battery.ID)
@@ -23,14 +27,18 @@ import <- function(fileschosen) { #can import both csv and excel files
                                                          "",Battery.ID))
                           data.frame(Filename,Battery.ID,Type=Battery.ID)
                         })
+  #attach type and ID data to structure
   files <- suppressMessages(left_join(files,filenames))
+  #store as factor to reduce memory footprint
   files$Filename <- as.factor(files$Filename)
   files
 }
 
 import.single <- function(filename,filepath) { #worker function
+  #find the file extension
   filext <- tail(strsplit(filename,".",T)[[1]],n=1)
   filepath.new <- paste0(filepath,".",filext)
+  #add file extension to temporary file to smooth out import
   file.copy(filepath,filepath.new)
   if(length(grep("csv",filext,T))){
     imported <- suppressWarnings(read_csv(filepath.new,col_names = (as.character(1:25))))
@@ -39,23 +47,29 @@ import.single <- function(filename,filepath) { #worker function
       return(bigXL(filepath.new))
     } else imported <- suppressWarnings(read_excel(filepath.new,col_names = F))
   } else return(NULL)
-  file.remove(filepath.new)
+  file.remove(filepath.new) #remove temporary files
   
+  #begin removing unnecessary information from files
+  #for performance reasons, this approach fails if there is no data for the first 50 rows
   mincol <- min(50,nrow(imported))
+  #create vector describing text data across rows
   charcount <- suppressWarnings(apply(imported[1:mincol,],1,function(x) sum(is.na(x==as.numeric(x))-is.na(x))))
+  #create vector describing numeric data across rows
   datacount <- suppressWarnings(apply(imported[1:mincol,],1,function(x) sum(!is.na(x))))
+  #the header is the best match between the text and numeric data
   headrow <- which.min(abs(charcount-median(datacount)))
+  #remove foreign characters from column names
   colnames(imported) <- make.names(imported[headrow,])
   imported <- imported[(headrow+1):nrow(imported),]
   imported <- imported[,colSums(is.na(imported))<(nrow(imported)/3)] #remove empty columns
-  imported <- imported[rowSums(is.na(imported))<(ncol(imported)/3),] #remove empty rows
-  imported <- mutate_each(imported,funs(cleantime)) #remove bad time symbols
-  imported <- type_convert(imported)
+  imported <- imported[rowSums(is.na(imported))<(ncol(imported)/3),] %>% #remove empty rows
+    mutate_each(funs(cleantime)) %>% #remove bad time symbols
+    type_convert()
   imported$Filename <- filename
   imported
 }
 
-bigXL <- function(xl){
+bigXL <- function(xl){ #worker function for big excel files
   xlfile <- xl
   sheets.orig <- excel_sheets(xl)
   if("Channel_Chart" %in% sheets.orig){ #arbin data, has weird xml structure
@@ -68,7 +82,8 @@ bigXL <- function(xl){
     xl <- xl[sapply(xl,ncol)==max(sapply(xl,ncol))] #pick out the files with the most columns
   }
   
-  bigXL.single <- function(imported,filename){
+  bigXL.single <- function(imported,filename){ #worker worker function for big excel files
+    #most of this is identical to the original import.single function, two turtles up
     mincol <- min(50,nrow(imported))
     charcount <- suppressWarnings(apply(imported[1:50,],1,function(x) sum(is.na(x==as.numeric(x))-is.na(x))))
     datacount <- suppressWarnings(apply(imported[1:50,],1,function(x) sum(!is.na(x))))
@@ -81,15 +96,18 @@ bigXL <- function(xl){
       mutate_each(funs(cleantime)) %>% #remove bad time symbols
       type_convert()
   }
-  file.remove(xlfile)
+  file.remove(xlfile) #remove temporary files
+  #return a merged data frame
   rbind.fill(mapply(bigXL.single,xl,sheetnames,SIMPLIFY = F))
 }
 
+#turn long-form data frame into a time series
+#graphs the resultant time series with error bars, if applicable
 dygraph.cast <- function(data, x,y,xlab=NULL,ylab=NULL,color=NULL,coloravg,group=NULL) {
   if(is.null(data)) return(NULL)
-  if("Battery.ID" %in% colnames(data)){
+  if("Battery.ID" %in% colnames(data)){ #regular
     casted <- dcast(data, as.formula(paste(x,"~Battery.ID")),mean,value.var=y)
-    lines <- colorline(data)
+    lines <- colorline(data) #figure out line pattern
     parsed <- mapply(function(x,y) paste0("%>% dySeries('",x,"',strokePattern=1:",y,")"),
                      lines$Battery.ID,lines$Line,SIMPLIFY=F)
     parsed <- paste(parsed, collapse = " ")
@@ -156,9 +174,6 @@ se <- function(x) sd(x)/sqrt(length(x))
 #this is a very fast and efficent way of calculating avg/sem for all variables
 #x should be set to the common x variable (commonly cycle or time)
 avgsem <- function(dataset, x = "Cycle") {
-  if(!all("Type" %in% colnames(dataset),"Battery.ID" %in% colnames(dataset))) {
-    stop("Could not find the Type and Battery.ID columns. Normalize names first.")
-  }
   newdata <- as.data.frame(dataset[,!colnames(dataset) %in% c("Battery.ID", x, "Type"), drop=F])
   cnames <- colnames(newdata)
   avg <- aggregate(newdata[, 1:length(cnames)],
@@ -190,7 +205,7 @@ bargraph <- function(dataset, y, ylab){
                                ymax=sprintf("%s + %s",avg,sem)), size = 1, width = .1) +
       xlab("") + ylab(ylab) + theme(legend.position = "none")
   } else return(NULL)
-  if(length(unique(dataset$Cycle))>1){ #going to add x axis facets
+  if(length(unique(dataset$Cycle))>1){ #going to add x-axis facets
     gg <- gg + facet_grid(.~Cycle) 
   }
   return(gg)
@@ -198,8 +213,8 @@ bargraph <- function(dataset, y, ylab){
 
 #different linetypes for different batteries within a type
 colorline <- function(dataset) {
-  dataset <- dataset[!duplicated(dataset$Battery.ID),c("Type","Battery.ID")]
-  dataset <- arrange(dataset, Battery.ID)
+  dataset <- dataset[!duplicated(dataset$Battery.ID),c("Type","Battery.ID")] %>%
+    arrange(Battery.ID)
   spl <- split(dataset$Battery.ID,dataset$Type)
   dataset$Line <- unsplit(sapply(spl,seq_along),dataset$Type)
   dataset
@@ -213,15 +228,15 @@ linegraph <- function(dataset, x, y) {
     gg <- ggplot(dataset,aes_string(x,y,color="Battery.ID",linetype="Battery.ID"))+geom_line()+
       scale_linetype_manual(values=as.numeric(lines$Line),labels=as.vector(lines$Battery.ID),name="")
   } else if("Type" %in% colnames(dataset)){ #avg+sem with geom_ribbon
-    avg <- y
     sem <- paste0(y,".SEM")
-    gg <- ggplot(dataset, aes_string(x,avg,color = "Type",fill = "Type")) +
-      geom_line()+geom_ribbon(aes_string(ymin=sprintf("%s - %s",avg,sem),
-                                         ymax=sprintf("%s + %s",avg,sem)),alpha = .3, color = NA, show.legend = F)
+    gg <- ggplot(dataset, aes_string(x,y,color = "Type",fill = "Type")) +
+      geom_line()+geom_ribbon(aes_string(ymin=sprintf("%s - %s",y,sem),
+                                         ymax=sprintf("%s + %s",y,sem)),alpha = .3, color = NA, show.legend = F)
   } else return(NULL)
   return(gg)
 }
 
+#first wave of timestamp checking
 cleantime <- function(x){
   if(is.numeric(x)) return(x)
   if(!length(grep(":",x[5]))) return(x) #check if there are : in the 5th line
@@ -232,6 +247,7 @@ cleantime <- function(x){
   toSeconds(x)
 }
 
+#turn text string into seconds
 toSeconds <- function(x){
   if (!is.character(x)) stop("x must be a character string of the form H:M:S")
   if (length(x)<=0)return(x)
@@ -243,28 +259,34 @@ toSeconds <- function(x){
   }))  
 }
 
-parsebatteryname <- function(Filename) { #sort filename into ID and Type
-  Battery.ID <- gsub(".xls?x*","",Filename)
+#sort filename into ID and Type
+parsebatteryname <- function(Filename) {
+  Battery.ID <- gsub(".xls?x*","",Filename) #remove file extensions
   Battery.ID <- gsub(".csv","",Battery.ID)
-  Battery.ID <- gsub("_"," ",Battery.ID)
+  Battery.ID <- gsub("_"," ",Battery.ID) #normalize spacers
   Battery.ID <- gsub("-"," ",Battery.ID)
+  #remove padding from IDs
   Battery.ID <- LCSrepeater(gsub("[[:digit:]]{10,} [A-E][[:digit:]]{1,2} ",
                                  "",trimws(Battery.ID)))
   Battery.ID <- gsub("Test ","",Battery.ID)
+  #calculate dissimilarity matrix for types
   Type <- adist(Battery.ID)
-  rownames(Type) <- Battery.ID
+  #cut dissimilarity matrix to a height of 1 mutation (maybe should be 2?)
   Type <- cutree(hclust(as.dist(Type)),h=1)
   parsed <- data.frame(Filename,Battery.ID,Type=as.factor(Type))
+  #first attempt at finding type names
   typenames <- unlist(by(Battery.ID,Type,function(x) LCS(x,T)[1]))
   if(sum(sapply(typenames,is.na))) {
+    #ok that didn't work, let's try something new
     typenames <- unlist(by(Battery.ID,Type,function(x) LCS(gsub("[^[:alpha:]]","",x),T)[1]))
   }
   levels(parsed$Type) <- typenames
   parsed
 }
 
-LCSrepeater <- function(strings, pattern=F) { #repeats lcs until there is a match
-  ni <- 0
+#repeats LCS algorithm until there is a match or we run out of iterations
+LCSrepeater <- function(strings, pattern=F) {
+  ni <- 0 #this looks wrong but it's right
   x <- character(0)
   while(!length(x) & ni<(min(nchar(as.character(strings)))-2)){
     ni <- ni + 1
@@ -273,15 +295,20 @@ LCSrepeater <- function(strings, pattern=F) { #repeats lcs until there is a matc
   LCS(strings,pattern,ni)
 }
 
-LCS <- function(strings, pattern=F, dampener=1) { #longest common substring
+#my attempt at solving the k-common longest common subsequence problem
+#rather than finding something elegant, we will use the shotgun approach:
+#blast strings into bits until something happens
+#this won't win awards, but it is surprisingly effective
+LCS <- function(strings, pattern=F, dampener=1) { 
   types <- length(strings)
-  if(types==1) return(strings)
+  if(types==1) return(strings) #can't find a pattern if k=1
   trafos <- drop(attr(adist(strings, counts=TRUE), "trafos"))
   if(min(nchar(as.character(strings)))<=2) {
     poss.pat <- do.call(rbind,stri_locate_all_regex(trafos,"M+"))
   } else {
-    poss.pat <- do.call(rbind,stri_locate_all_regex(trafos, paste(c("M{2,",
-                                                                    min(nchar(as.character(strings)))-dampener,"}"),collapse="")))
+    poss.pat <- do.call(rbind,
+                        stri_locate_all_regex(trafos, paste(c("M{2,",
+                        min(nchar(as.character(strings)))-dampener,"}"),collapse="")))
   }
   poss.pat <- unique(poss.pat)
   pat <- mapply(function(x,y) stri_sub(strings,x,y),poss.pat[,1],poss.pat[,2])
