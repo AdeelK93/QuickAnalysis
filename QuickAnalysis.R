@@ -261,9 +261,10 @@ toSeconds <- function(x){
 
 #sort filename into ID and Type
 parsebatteryname <- function(Filename) {
-  Battery.ID <- gsub(".xls?x*","",Filename) #remove file extensions
-  Battery.ID <- gsub(".csv","",Battery.ID)
-  Battery.ID <- gsub("_"," ",Battery.ID) #normalize spacers
+  Battery.ID <- gsub(".xls?x*","",Filename,ignore.case=T) #remove file extensions
+  Battery.ID <- gsub(".csv","",Battery.ID,ignore.case=T)
+  Battery.ID <- gsub(".txt","",Battery.ID,ignore.case=T)
+  Battery.ID <- gsub("_"," ",Battery.ID,ignore.case=T) #normalize spacers
   Battery.ID <- gsub("-"," ",Battery.ID)
   #remove padding from IDs
   Battery.ID <- LCSrepeater(gsub("[[:digit:]]{10,} [A-E][[:digit:]]{1,2} ",
