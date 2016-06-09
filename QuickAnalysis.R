@@ -59,8 +59,11 @@ import.single <- function(filename,filepath) { #worker function
   #the header is the best match between the text and numeric data
   headrow <- which.min(abs(charcount-median(datacount)))
   #remove foreign characters from column names
-  colnames(imported) <- make.names(imported[headrow,])
-  imported <- imported[(headrow+1):nrow(imported),]
+  cnames <- make.names(trimws(imported[headrow,]))
+  if(!sum(duplicated(cnames[cnames!="NA."]))) { #no duplicated column names
+    colnames(imported) <- cnames
+    imported <- imported[(headrow+1):nrow(imported),]
+  }
   imported <- imported[,colSums(is.na(imported))<(nrow(imported)/3)] #remove empty columns
   imported <- imported[rowSums(is.na(imported))<(ncol(imported)/3),] %>% #remove empty rows
     mutate_each(funs(cleantime)) %>% #remove bad time symbols
@@ -88,11 +91,14 @@ bigXL <- function(xl){ #worker function for big excel files
     charcount <- suppressWarnings(apply(imported[1:50,],1,function(x) sum(is.na(x==as.numeric(x))-is.na(x))))
     datacount <- suppressWarnings(apply(imported[1:50,],1,function(x) sum(!is.na(x))))
     headrow <- which.min(abs(charcount-median(datacount)))
-    colnames(imported) <- make.names(imported[headrow,])
-    imported <- imported[(headrow+1):nrow(imported),]
+    cnames <- make.names(trimws(imported[headrow,]))
+    if(!sum(duplicated(cnames))) { #no duplicated column names
+      colnames(imported) <- cnames
+      imported <- imported[(headrow+1):nrow(imported),]
+    }
     imported$Filename <- filename
     imported <- imported[,colSums(is.na(imported))<(nrow(imported)/3)] #remove empty columns
-    imported <- imported[rowSums(is.na(imported))<(ncol(imported)/3),] %>% #remove empty rows
+    imported[rowSums(is.na(imported))<(ncol(imported)/3),] %>% #remove empty rows
       mutate_each(funs(cleantime)) %>% #remove bad time symbols
       type_convert()
   }
@@ -162,14 +168,16 @@ reducer <- function(dataset, newcolumn = "V", y, yval, x) {
   data.length <- nrow(newdata)
   colnames(newdata) <- c("Cycle", "Battery.ID", y)
   #this left join followed by a select allows for values to be matched up
-  newdata <- suppressMessages(select_(left_join(newdata, dataset),
+  newdata <- suppressMessages(select_(left_join(newdata, dataset[,c("Battery.ID","Type")]),
                                       "Cycle", "Battery.ID", "Type", x))
+  newdata <- unique(newdata[ ,1:4] )
   colnames(newdata) <- c("Cycle", "Battery.ID", "Type", newcolumn)
   if(data.length!=nrow(newdata)) print(paste((nrow(newdata)-data.length),"ties found"))
   newdata
 }
 
 se <- function(x) sd(x)/sqrt(length(x))
+diff0 <- function(x) c(0,diff(x))
 
 #this is a very fast and efficent way of calculating avg/sem for all variables
 #x should be set to the common x variable (commonly cycle or time)
@@ -239,6 +247,10 @@ linegraph <- function(dataset, x, y) {
 #first wave of timestamp checking
 cleantime <- function(x){
   if(is.numeric(x)) return(x)
+  if("POSIXct" %in% class(x)) { #this *should* be impossible
+    x <- as.numeric(x)
+    return(x-min(x))
+  }
   if(!length(grep(":",x[5]))) return(x) #check if there are : in the 5th line
   x <- gsub("d","",x)
   x <- gsub(" ","",x)
@@ -248,7 +260,7 @@ cleantime <- function(x){
 }
 
 #turn text string into seconds
-toSeconds <- function(x){
+toSeconds <- function(x) {
   if (!is.character(x)) stop("x must be a character string of the form H:M:S")
   if (length(x)<=0)return(x)
   unlist(lapply(x, function(i){
@@ -257,6 +269,13 @@ toSeconds <- function(x){
     else if (length(i) == 2) i[1]*60 + i[2]
     else if (length(i) == 1) i[1]
   }))  
+}
+
+#jagged to monotonic time series
+as.monotonic <- function(x) {
+  y <- diff0(x)
+  y[y<0] <- min(y[y>0])
+  cumsum(y) + 1 #or should it be min(x)?
 }
 
 #sort filename into ID and Type
@@ -274,12 +293,18 @@ parsebatteryname <- function(Filename) {
   Type <- adist(Battery.ID)
   #cut dissimilarity matrix to a height of 1 mutation (maybe should be 2?)
   Type <- cutree(hclust(as.dist(Type)),h=1)
+  #ensure that there is no mismatch between factors and numbers
+  Battery.ID <- suppressWarnings(vapply(Battery.ID,function(x){
+    if(!is.na(as.numeric(x))) paste0("Bat",x)
+    else x
+  },"x"))
   parsed <- data.frame(Filename,Battery.ID,Type=as.factor(Type))
-  #first attempt at finding type names
-  typenames <- unlist(by(Battery.ID,Type,function(x) LCS(x,T)[1]))
-  if(sum(sapply(typenames,is.na))) {
-    #ok that didn't work, let's try something new
+  #try different things to find type names
+  typenames <- NA
+  while (sum(sapply(typenames,is.na))) {
+    typenames <- unlist(by(Battery.ID,Type,function(x) LCS(x,T)[1]))
     typenames <- unlist(by(Battery.ID,Type,function(x) LCS(gsub("[^[:alpha:]]","",x),T)[1]))
+    typenames <- Battery.ID
   }
   levels(parsed$Type) <- typenames
   parsed
@@ -309,7 +334,7 @@ LCS <- function(strings, pattern=F, dampener=1) {
   } else {
     poss.pat <- do.call(rbind,
                         stri_locate_all_regex(trafos, paste(c("M{2,",
-                        min(nchar(as.character(strings)))-dampener,"}"),collapse="")))
+                                                              min(nchar(as.character(strings)))-dampener,"}"),collapse="")))
   }
   poss.pat <- unique(poss.pat)
   pat <- mapply(function(x,y) stri_sub(strings,x,y),poss.pat[,1],poss.pat[,2])

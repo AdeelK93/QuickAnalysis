@@ -107,6 +107,12 @@ totaltime.sorted <- reactive(if(!is.null(imported.orig())) {
       else x
     }))
   }
+  if(sum(is.na(x))) return(x)
+  #verify that data is monotonic
+  x <- unlist(tapply(x,imported.orig()$Filename,function(x) {
+      if(!all(x==cummax(x))) x <- as.monotonic(x) #nonmonotonic
+      else x
+    }))
   x
 })
 output$steptime <- renderUI({ 
@@ -136,12 +142,20 @@ output$cycle <- renderUI({
             agrep.best("Cycle",colnames(imported.orig())),T)
 })
 cycle.sorted <- reactive(if(!is.null(imported.orig())) {
-  rowMeans(imported.orig()[input$cycle],na.rm=T)
+  x <- rowMeans(imported.orig()[input$cycle],na.rm=T)
+  if(sum(is.na(x))) return(x)
+  #verify that data is monotonic
+  x <- unlist(tapply(x,imported.orig()$Filename,function(x) {
+      if(!all(x==cummax(x))) x <- as.monotonic(x) #nonmonotonic
+      else x
+    }))
+  x
 })
 
 incomplete <- reactive({if(is.null(imported())) return(NULL)
   #count the number of missing values, for heatmap and diagnostics
-  sum(sapply(imported()[c("Battery.ID",stdnames)], function(x) sum(is.na(x))))})
+  sum(sapply(imported()[c("Battery.ID",stdnames)], function(x) sum(is.na(x))))
+  })
 ```
 
 ```{r import.vars}
