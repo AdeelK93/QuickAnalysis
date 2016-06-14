@@ -288,9 +288,11 @@ parsebatteryname <- function(Filename) {
   #remove padding from IDs
   Battery.ID <- LCSrepeater(gsub("[[:digit:]]{10,} [A-E][[:digit:]]{1,2} ",
                                  "",trimws(Battery.ID)))
-  Battery.ID <- sort(gsub("Test ","",Battery.ID))
+  Battery.ID <- gsub("Test ","",Battery.ID)
+  asc.ord <- order(Battery.ID)
+  Battery.ID <- Battery.ID[asc.ord]
   #calculate dissimilarity matrix for types
-  Type <- adist(sort(Battery.ID))
+  Type <- adist(Battery.ID)
   #cut dissimilarity matrix to a height of 1 mutation (maybe should be 2?)
   Type <- cutree(hclust(as.dist(Type)),h=1)
   #ensure that there is no mismatch between factors and numbers
@@ -298,7 +300,7 @@ parsebatteryname <- function(Filename) {
     if(!is.na(as.numeric(x))) paste0("Bat",x)
     else x
   },"x"))
-  parsed <- data.frame(Filename,Battery.ID,Type=as.factor(Type))
+  parsed <- data.frame(Filename=Filename[asc.ord],Battery.ID,Type=as.factor(Type))
   typenames <- unlist(by(Battery.ID,Type,function(x) LCS(x,T)[1]))
   #try different things to find type names
   if(sum(sapply(typenames,is.na))) {
