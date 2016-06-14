@@ -288,9 +288,9 @@ parsebatteryname <- function(Filename) {
   #remove padding from IDs
   Battery.ID <- LCSrepeater(gsub("[[:digit:]]{10,} [A-E][[:digit:]]{1,2} ",
                                  "",trimws(Battery.ID)))
-  Battery.ID <- gsub("Test ","",Battery.ID)
+  Battery.ID <- sort(gsub("Test ","",Battery.ID))
   #calculate dissimilarity matrix for types
-  Type <- adist(Battery.ID)
+  Type <- adist(sort(Battery.ID))
   #cut dissimilarity matrix to a height of 1 mutation (maybe should be 2?)
   Type <- cutree(hclust(as.dist(Type)),h=1)
   #ensure that there is no mismatch between factors and numbers
@@ -299,13 +299,12 @@ parsebatteryname <- function(Filename) {
     else x
   },"x"))
   parsed <- data.frame(Filename,Battery.ID,Type=as.factor(Type))
+  typenames <- unlist(by(Battery.ID,Type,function(x) LCS(x,T)[1]))
   #try different things to find type names
-  typenames <- NA
-  while (sum(sapply(typenames,is.na))) {
-    typenames <- unlist(by(Battery.ID,Type,function(x) LCS(x,T)[1]))
-    typenames <- unlist(by(Battery.ID,Type,function(x) LCS(gsub("[^[:alpha:]]","",x),T)[1]))
-    typenames <- Battery.ID
+  if(sum(sapply(typenames,is.na))) {
+    typenames <- unlist(by(Battery.ID,Type,function(x) LCS(gsub("[^[:alpha:]]","",x),T)[1])) 
   }
+  if(sum(sapply(typenames,is.na))) typenames <- Battery.ID
   levels(parsed$Type) <- typenames
   parsed
 }
