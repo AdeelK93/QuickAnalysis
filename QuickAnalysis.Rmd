@@ -4,6 +4,8 @@ output:
   flexdashboard::flex_dashboard:
     orientation: rows
     theme: paper
+    navbar:
+      - {icon: "ion-social-github", href: "https://github.com/AdeelK93/QuickAnalysis", align: right}
 runtime: shiny
 ---
 
@@ -64,7 +66,7 @@ output$download <- downloadHandler(paste('data-', Sys.Date(), '.zip', sep=''),
 fluidPage(downloadButton('download', 'Download csv'))
 ```
 
-Column {data-width=400 .tabset}
+Column {data-width=400 .tabset .tabset-fade}
 -------------------------------------
 
 ###Choose variables
@@ -159,7 +161,8 @@ incomplete <- reactive({if(is.null(imported())) return(NULL)
 ```
 
 ```{r import.vars}
-fluidPage(column(12,div(style = "height:70px;",
+fluidPage(column(12,div(
+  style = "height:70px;",
   htmlOutput("voltage"),
   htmlOutput("current"),
   htmlOutput("amphours"),
@@ -189,8 +192,9 @@ imported.sorted <- reactive({
 imported <- reactive({ #this is the final sorted dataset to be used by analytical functions
   if(is.null(imported.sorted())) return(NULL)
   x <- select(imported.sorted(), -Type, -Battery.ID)
-  x <- suppressMessages(left_join(x,labs()))
-  mutate(x, Type=as.factor(Type),Battery.ID=as.factor(Battery.ID))
+  suppressMessages(left_join(x,labs())) %>%
+  mutate(Type=as.factor(Type),Battery.ID=as.factor(Battery.ID)) %>%
+  filter(Type!="skip")
 })
 ```
 
@@ -213,15 +217,21 @@ plotlyOutput("heatmap")
 ```
 
 ###Diagnostic
-Summary of imported data:
 ```{r diagnostic}
-renderPrint(summary(imported()))
+radioButtons("diag.choice",NULL,c("Summary","Structure","Head","Tail"),inline=T)
+renderPrint(switch(input$diag.choice,
+                   "Summary"=summary(imported()),
+                   "Structure"=str(imported()),
+                   "Head"=head(imported()),
+                   "Tail"=tail(imported())
+))
 ```
 
 Column {data-width=600}
 -------------------------------------
 
 ###Label Table
+Will ignore files with type "skip".
 ```{r labeltable}
 values <- reactiveValues(labels=NULL)
 observeEvent(imported.orig(), {
@@ -247,15 +257,18 @@ Hex colors or any of [these named colors](http://www.stat.columbia.edu/~tzheng/f
 ```{r colortable}
 values <- reactiveValues(colors=NULL)
 observeEvent(labs(), {
-  values$colors <- data.frame(Type=sort(unique(labs()$Type)),
-    Color=rainbow_hcl(length(unique(labs()$Type)),70), stringsAsFactors=F)
+  values$colors <- data.frame(Type=sort(unique(labs()$Type[labs()$Type!="skip"])),
+    Color=rainbow_hcl(length(unique(labs()$Type[labs()$Type!="skip"])),70),
+    stringsAsFactors=F)
 })
 observeEvent(imported.orig(), {
-  values$colors <- data.frame(Type=sort(unique(labs()$Type)),
-    Color=rainbow_hcl(length(unique(labs()$Type)),70), stringsAsFactors=F)
+  values$colors <- data.frame(Type=sort(unique(labs()$Type[labs()$Type!="skip"])),
+    Color=rainbow_hcl(length(unique(labs()$Type[labs()$Type!="skip"])),70),
+    stringsAsFactors=F)
 })
 output$colors.hot <- renderRHandsontable(if(!is.null(values$colors)){
-  rhandsontable(values$colors, contextMenu=F, maxRows=length(unique(labs()$Type)),
+  rhandsontable(values$colors, contextMenu=F,
+                maxRows=length(unique(labs()$Type[labs()$Type!="skip"])),
                 rowHeaders = NULL) %>%
     hot_col("Type", readOnly = T)
 })
@@ -266,20 +279,22 @@ cols <- reactive({ #this is the color data, by type
 })
 cols.cast <- reactive({ #this is the color data, by ID
   if(!is.null(cols())){
-    suppressMessages(arrange(left_join(labs(),cols()),Battery.ID))
+    suppressMessages(arrange(left_join(filter(labs(),Type!="skip"),
+                                       cols()),Battery.ID))
   }
 })
 ```
 
-Explore {data-orientation=rows data-navmenu="Continuous"}
+Explore {data-orientation=columns data-navmenu="Continuous"}
 =====================================
 
-Column {.sidebar}
------------------------------------------------------------------------
-  
+Column {data-width=200}
+-------------------------------------
+
+### Choose options
 Select continuous variables for graphing  
   
-```{r xy.graph}
+```{r xy.options}
 graphnames <- reactive(if(!is.null(imported())) colnames(imported()[sapply(imported(),
                                                                                 is.numeric)]))
 timeunits <- reactive(if(!is.null(imported.sorted())) {
@@ -288,21 +303,30 @@ timeunits <- reactive(if(!is.null(imported.sorted())) {
   else if(x<7200) return("TimeMin") #under 2 hours -> minutes
   else return("TimeHr") #hours
 })
+output$xy.step <- renderUI({ 
+  sliderInput("xy.step","Is there a step to isolate? (0 for no)",0,
+              tryCatch(max(imported.sorted()$Step),
+                       error=function(e) 1),0,1,T)
+})
 output$xy.cycle <- renderUI({ 
-sliderInput("xy.cycle","Is there a cycle to isolate? (0 for no)",0,
-            tryCatch(max(imported.sorted()$Cycle),
-            error=function(e) 1),0,1,T)
-  })
-#should add step selection here
+  sliderInput("xy.cycle","Is there a cycle to isolate? (0 for no)",0,
+              tryCatch(max(imported.sorted()$Cycle),
+                       error=function(e) 1),0,1,T)
+})
 #this data is fed into the continuous variable graph
 imported.xy <- reactive(if(!is.null(imported())) {
   if(is.null(input$xy.cycle)) return(imported())
-  else if(input$xy.cycle==0) return(imported())
+  else if(input$xy.cycle==0) x <- imported()
   else {
-    imported()[imported()$Cycle==input$xy.cycle,] %>%
+    x <- imported()[imported()$Cycle==input$xy.cycle,] %>%
     within({Total.Time <- ave(Total.Time, Battery.ID, FUN=function(x) x-min(x))}) %>%
     mutate(TimeHr=Total.Time/3600,TimeMin=Total.Time/60)
-    }
+  }
+  if(input$xy.avg & !is.null(x)) {
+    x <- avgsem(select_(x,input$top.yn,input$bottom.yn,input$bottom.xn,
+                        "Type","Battery.ID"),input$bottom.xn)
+  }
+  return(x)
 })
 
 output$top.yn <- renderUI({ 
@@ -315,37 +339,43 @@ output$bottom.xn <- renderUI({
 selectInput("bottom.xn","Common x-axis:",graphnames(),timeunits())
   })
 
-fluidPage(
+fluidPage(column(12,div(
+  style = "height:80px;",
   htmlOutput("top.yn"),
   htmlOutput("bottom.yn"),
   htmlOutput("bottom.xn"),
+  #htmlOutput("xy.step"),
   htmlOutput("xy.cycle"),
+  checkboxInput("xy.avg","Average/SEM by type"),
   textOutput("legendDivID")
-)
+)))
 ```
 
-Row
+Column
 -----------------------------------------------------------------------
-### Top Graph
+
+### Top Graph {.no-title}
 ```{r top.graph}
-renderDygraph(withProgress(message="Rendering plot...",
-                          dygraph.cast(imported.xy(),input$bottom.xn,input$top.yn,
-                          input$bottom.xn,input$top.yn,cols.cast()$Color,group="brc")))
+renderDygraph(withProgress(
+  message="Rendering plot...",
+  dygraph.cast(imported.xy(),input$bottom.xn,input$top.yn,input$bottom.xn,
+               input$top.yn,cols.cast()$Color,cols()$Color,group="brc")
+))
 ```
 
-Row
------------------------------------------------------------------------
-### Bottom Graph
+### Bottom Graph {.no-title}
 ```{r bottom.graph}
-renderDygraph(withProgress(message="Rendering plot...",
-                           dygraph.cast(imported.xy(),input$bottom.xn,input$bottom.yn,
-                           input$bottom.xn,input$bottom.yn,cols.cast()$Color,group="brc")))
+renderDygraph(withProgress(
+  message="Rendering plot...",
+  dygraph.cast(imported.xy(),input$bottom.xn,input$bottom.yn,input$bottom.xn,
+               input$bottom.yn,cols.cast()$Color,cols()$Color,group="brc")
+))
 ```
 
 Share {data-orientation=columns data-navmenu="Continuous"}
 =====================================
 
-Column {data-width=300 .tabset}
+Column {data-width=300 .tabset .tabset-fade}
 -------------------------------------
     
 ### Choose options
@@ -402,15 +432,21 @@ fluidPage(
 Column {data-width=700}
 -------------------------------------
 
-### Graph
+### Graph {.no-title}
 ```{r xypublish.graph}
 xyline1 <- reactive(if(!is.null(imported.xy())) {
-  linegraph(imported.xy(),input$bottom.xn,input$top.yn) + 
-    scale_color_manual(values=cols.cast()$Color,name="")
+  gg <- linegraph(imported.xy(),input$bottom.xn,input$top.yn) + 
+    scale_fill_manual(values=cols.cast()$Color,name="")
+  if(input$xy.avg) gg <- gg + scale_color_manual(values=cols()$Color,name="") #avg/sem
+  else gg <- gg + scale_color_manual(values=cols.cast()$Color,name="") #regular
+  gg
 })
 xyline2 <- reactive(if(!is.null(imported.xy())) {
-  linegraph(imported.xy(),input$bottom.xn,input$bottom.yn) + 
-    scale_color_manual(values=cols.cast()$Color,name="")
+  gg <- linegraph(imported.xy(),input$bottom.xn,input$bottom.yn) + 
+    scale_fill_manual(values=cols.cast()$Color,name="")
+  if(input$xy.avg) gg <- gg + scale_color_manual(values=cols()$Color,name="") #avg/sem
+  else gg <- gg + scale_color_manual(values=cols.cast()$Color,name="") #regular
+  gg
 })
 renderPlot(withProgress(message="Rendering...",xypub.graph()))
 xypub.graph <- reactive(if(!is.null(imported.xy())) {
@@ -467,7 +503,7 @@ output$xypub.svg <- downloadHandler(paste('plot-', Sys.Date(), '.svg', sep=''),
 Explore {data-orientation=columns data-navmenu="Discrete"}
 =====================================
 
-Column {data-width=300 .tabset}
+Column {data-width=300 .tabset .tabset-fade}
 -------------------------------------
     
 ### Choose options
@@ -486,7 +522,7 @@ fluidPage(
   htmlOutput("varnames.yn"),
   textInput("options.yv","Value of the known variable: (numeric, or type min/max)"),
   htmlOutput("varnames.xn"),
-  checkboxInput("avg","Calculate average/SEM by type"),
+  checkboxInput("avg","Average/SEM by type"),
   textInput("options.name","Name for this new variable:","Variable")
 )
 ```
@@ -558,13 +594,14 @@ output$filter.step <- renderUI({
               imported.sorted()$Step,.99))]),error=function(e) 1),0,1)
 })
 
-fluidPage(column(12,div(style = "height:80px;",
-        htmlOutput("filter.voltage"),
-        htmlOutput("filter.current"),
-        htmlOutput("filter.amphours"),
-        htmlOutput("filter.totaltime"),
-        htmlOutput("filter.steptime"),
-        htmlOutput("filter.step")
+fluidPage(column(12,div(
+  style = "height:80px;",
+  htmlOutput("filter.voltage"),
+  htmlOutput("filter.current"),
+  htmlOutput("filter.amphours"),
+  htmlOutput("filter.totaltime"),
+  htmlOutput("filter.steptime"),
+  htmlOutput("filter.step")
 )))
 
 #will perform calculations on this filtered dataset
@@ -601,7 +638,7 @@ fluidPage(
 ```
 
 
-Column {data-width=700 .tabset}
+Column {data-width=700 .tabset .tabset-fade}
 -------------------------------------
 
 ### Graph
@@ -659,7 +696,7 @@ renderDataTable(datatable(red.table(),
 Share {data-orientation=columns data-navmenu="Discrete"}
 =====================================
 
-Column {data-width=300 .tabset}
+Column {data-width=300 .tabset .tabset-fade}
 -------------------------------------
     
 ### Choose options
@@ -710,7 +747,7 @@ fluidPage(
 Column {data-width=700}
 -------------------------------------
 
-### Graph
+### Graph {.no-title}
 ```{r publish.graph}
 renderPlot(withProgress(message="Rendering...",pub.graph()))
 pub.graph <- reactive(if(!is.null(reduced())) {
