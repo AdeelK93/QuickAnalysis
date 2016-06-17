@@ -80,7 +80,11 @@ bigXL <- function(xl){ #worker function for big excel files
     sheets.orig <- grep("Channel(?!_Chart)",sheets.orig,perl=T)-1
     xl <- lapply(sheets.orig,read_excel,path=xl,col_names = F)
   } else {
-    xl <- lapply(sheets.orig,read_excel,path=xl,col_names = F)
+    xl <- lapply(sheets.orig,
+                 function(x) tryCatch(read_excel(xl,x,col_names = F),
+                                      error=function(e) NULL))
+    xl <- xl[!sapply(xl, is.null)]
+    print(str(xl))
     sheetnames <- excel_sheets(xlfile)[sapply(xl,ncol)==max(sapply(xl,ncol))]
     xl <- xl[sapply(xl,ncol)==max(sapply(xl,ncol))] #pick out the files with the most columns
   }
@@ -148,7 +152,6 @@ dygraph.cast <- function(data, x,y,xlab=NULL,ylab=NULL,color=NULL,coloravg,group
 
 #reduce cycling data by extracting a single data point of interest per cycle
 #syntax is: when y=yval, what is x? ie when voltage=6, what is time?
-#NOTE: Should make more efficient by checking if x=y
 reducer <- function(dataset, newcolumn = "V", y, yval, x) {
   if(yval=="max") func <- max
   else if(yval=="min") func <- min
@@ -165,12 +168,17 @@ reducer <- function(dataset, newcolumn = "V", y, yval, x) {
       list(dataset$Cycle, dataset$Battery.ID),
       func
     ))
+  newdata <- newdata[complete.cases(newdata),]
   data.length <- nrow(newdata)
   colnames(newdata) <- c("Cycle", "Battery.ID", y)
-  #this left join followed by a select allows for values to be matched up
-  newdata <- suppressMessages(select_(left_join(newdata, dataset[,c("Battery.ID","Type")]),
-                                      "Cycle", "Battery.ID", "Type", x))
-  newdata <- unique(newdata[ ,1:4] )
+  #this left join allows for values to be matched up
+  if(x!=y) {
+    newdata <- suppressMessages(select_(left_join(newdata, dataset[,c("Battery.ID","Type",x,y)]),
+                                        "Cycle", "Battery.ID", "Type", x))
+  } else {
+    newdata <- suppressMessages(left_join(newdata, unique(dataset[,c("Battery.ID","Type")])))[,c(1,2,4,3)]
+  }
+  newdata <- unique(newdata)
   colnames(newdata) <- c("Cycle", "Battery.ID", "Type", newcolumn)
   if(data.length!=nrow(newdata)) print(paste((nrow(newdata)-data.length),"ties found"))
   newdata
@@ -223,6 +231,7 @@ bargraph <- function(dataset, y, ylab){
 colorline <- function(dataset) {
   dataset <- dataset[!duplicated(dataset$Battery.ID),c("Type","Battery.ID")] %>%
     arrange(Battery.ID)
+  #something is broken here
   spl <- split(dataset$Battery.ID,dataset$Type)
   dataset$Line <- unsplit(sapply(spl,seq_along),dataset$Type)
   dataset
