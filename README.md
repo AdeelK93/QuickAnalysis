@@ -29,7 +29,7 @@ Everything is live-updating and interactive, so you can change anything at any t
 * Move the legend around to a non-intrusive location
 * Change the font size to improve readability
 * Optionally add a chart title
-* Select a custom x and y range for graphing (must explicitly define both or neither)
+* Select a custom x and y range for graphing
 * Add a horizontal line to call attention to a critical event
 
 ##Coming soon

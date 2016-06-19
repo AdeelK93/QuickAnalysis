@@ -494,16 +494,15 @@ xyline2 <- reactive(if(!is.null(imported.xy())) {
 })
 renderPlot(withProgress(message="Rendering...",xypub.graph()))
 xypub.graph <- reactive(if(!is.null(imported.xy())) {
-  
   #these are the x-y limits
-  if(!is.na(input$xypub.y1) & !is.na(input$xypub.y2) & !is.na(input$xypub.x1) & !is.na(input$xypub.x2)) {
-    gg <- xyline1() + coord_cartesian(xlim=c(input$xypub.x1,input$xypub.x2),
-                                      ylim=c(input$xypub.y1,input$xypub.y2))
-  } else gg <- xyline1()
+  xlim <- c(input$xypub.x1,input$xypub.x2)
+  if(any(is.na(xlim))) xlim <- NULL
+  ylim <- c(input$xypub.y1,input$xypub.y2)
+  if(any(is.na(ylim))) ylim <- NULL
+  
+  gg <- xyline1() + coord_cartesian(xlim=xlim,ylim=ylim)
   #if(input$xypub.both){
-  #  if(!is.na(xypub.y1b) & !is.na(xypub.y2b) & !is.na(xypub.x1) & !is.na(xypub.x2)) {
-  #    gg2 <- xyline2() + coord_cartesian(xlim=c(xypub.x1,xypub.x2),ylim=c(xypub.y1b,xypub.y2b))
-  #  } else gg2 <- xyline2()
+  # gg2 <- xyline2()
   #}
   
   if(input$xyhline.col!="None" & input$xyhline.col!="none" & nchar(input$xyhline.col)){
@@ -808,17 +807,17 @@ Column {data-width=700}
 ```{r publish.graph}
 renderPlot(withProgress(message="Rendering...",pub.graph()))
 pub.graph <- reactive(if(!is.null(reduced())) {
+  #these are the x-y limits
+  xlim <- c(input$pub.x1,input$pub.x2)
+  if(any(is.na(xlim))) xlim <- NULL
+  ylim <- c(input$pub.y1,input$pub.y2)
+  if(any(is.na(ylim))) ylim <- NULL
   
   if(input$pub.type=="Bar"){
-    if(!is.na(input$pub.y1) & !is.na(input$pub.y2)){
-      gg <- bar() + coord_cartesian(ylim=c(input$pub.y1,input$pub.y2))
-    } else gg <- bar()
+    gg <- bar() + coord_cartesian(ylim=ylim)
   } 
   else { #line
-    if(!is.na(input$pub.y1) & !is.na(input$pub.y2) & !is.na(input$pub.x1) & !is.na(input$pub.x2)){
-         gg <- ggline() + coord_cartesian(xlim=c(input$pub.x1,input$pub.x2),
-                                          ylim=c(input$pub.y1,input$pub.y2))
-       } else gg <- ggline()
+    gg <- ggline() + coord_cartesian(xlim=xlim,ylim=ylim)
   }
   
   if(input$hline.col!="None" & input$hline.col!="none" & nchar(input$hline.col)){
