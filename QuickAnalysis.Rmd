@@ -288,7 +288,7 @@ cols.cast <- reactive({ #this is the color data, by ID
 Explore {data-orientation=columns data-navmenu="Continuous"}
 =====================================
 
-Column {data-width=200}
+Column {data-width=200 .tabset .tabset-fade}
 -------------------------------------
 
 ### Choose options
@@ -303,25 +303,24 @@ timeunits <- reactive(if(!is.null(imported.sorted())) {
   else if(x<7200) return("TimeMin") #under 2 hours -> minutes
   else return("TimeHr") #hours
 })
-output$xy.step <- renderUI({ 
-  sliderInput("xy.step","Is there a step to isolate? (0 for no)",0,
-              tryCatch(max(imported.sorted()$Step),
-                       error=function(e) 1),0,1,T)
-})
-output$xy.cycle <- renderUI({ 
-  sliderInput("xy.cycle","Is there a cycle to isolate? (0 for no)",0,
-              tryCatch(max(imported.sorted()$Cycle),
-                       error=function(e) 1),0,1,T)
-})
+
 #this data is fed into the continuous variable graph
 imported.xy <- reactive(if(!is.null(imported())) {
   if(is.null(input$xy.cycle)) return(imported())
   else if(input$xy.cycle==0) x <- imported()
-  else {
+  else { #baseline time stamp correction
     x <- imported()[imported()$Cycle==input$xy.cycle,] %>%
     within({Total.Time <- ave(Total.Time, Battery.ID, FUN=function(x) x-min(x))}) %>%
     mutate(TimeHr=Total.Time/3600,TimeMin=Total.Time/60)
   }
+  if(input$xy.step) x <- filter(x,Step==input$xy.step)
+  x <- tryCatch(filter(x,
+         Voltage>=input$xy.voltage[1],Voltage<=input$xy.voltage[2],
+         Current>=input$xy.current[1],Current<=input$xy.current[2],
+         Amp.Hours>=input$xy.amphours[1],Amp.Hours<=input$xy.amphours[2],
+         Total.Time>=input$xy.totaltime[1],Total.Time<=input$xy.totaltime[2],
+         Step.Time>=input$xy.steptime[1],Step.Time<=input$xy.steptime[2]
+         ),error=function(e) x)
   if(input$xy.avg & !is.null(x)) {
     x <- avgsem(select_(x,input$top.yn,input$bottom.yn,input$bottom.xn,
                         "Type","Battery.ID"),input$bottom.xn)
@@ -344,10 +343,55 @@ fluidPage(column(12,div(
   htmlOutput("top.yn"),
   htmlOutput("bottom.yn"),
   htmlOutput("bottom.xn"),
-  #htmlOutput("xy.step"),
-  htmlOutput("xy.cycle"),
   checkboxInput("xy.avg","Average/SEM by type"),
   textOutput("legendDivID")
+)))
+```
+
+###Filter
+```{r xy.filter}
+#filter dataset for continuous variable analysis
+#filter min/max determine the bounds of the sliders
+output$xy.voltage <- renderUI({ 
+  sliderInput("xy.voltage","Select a voltage range:",filter.min()[1],filter.max()[1],
+            c(filter.min()[1],filter.max()[1]),0.1)
+  })
+output$xy.current <- renderUI({ 
+  sliderInput("xy.current","Select a current range:",filter.min()[2],filter.max()[2],
+            c(filter.min()[2],filter.max()[2]),0.1)
+  })
+output$xy.amphours <- renderUI({ 
+  sliderInput("xy.amphours","Select a capacity range:",filter.min()[3],filter.max()[3],
+            c(filter.min()[3],filter.max()[3]),0.1)
+  })
+output$xy.totaltime <- renderUI({ 
+  sliderInput("xy.totaltime","Select a total time range:",filter.min()[4],filter.max()[4],
+            c(filter.min()[4],filter.max()[4]),1)
+  })
+output$xy.steptime <- renderUI({ 
+  sliderInput("xy.steptime","Select a step time range:",filter.min()[5],filter.max()[5],
+            c(filter.min()[5],filter.max()[5]),1)
+  })
+output$xy.step <- renderUI({ 
+  sliderInput("xy.step","Is there a step to isolate? (0 for no)",0,
+              tryCatch(max(imported.sorted()$Step),
+                       error=function(e) 1),0,1,T)
+})
+output$xy.cycle <- renderUI({ 
+  sliderInput("xy.cycle","Is there a cycle to isolate? (0 for no)",0,
+              tryCatch(max(imported.sorted()$Cycle),
+                       error=function(e) 1),0,1,T)
+})
+
+fluidPage(column(12,div(
+  style = "height:80px;",
+  htmlOutput("xy.voltage"),
+  htmlOutput("xy.current"),
+  htmlOutput("xy.amphours"),
+  htmlOutput("xy.totaltime"),
+  htmlOutput("xy.steptime"),
+  htmlOutput("xy.step"),
+  htmlOutput("xy.cycle")
 )))
 ```
 
@@ -375,7 +419,7 @@ renderDygraph(withProgress(
 Share {data-orientation=columns data-navmenu="Continuous"}
 =====================================
 
-Column {data-width=300 .tabset .tabset-fade}
+Column {data-width=250 .tabset .tabset-fade}
 -------------------------------------
     
 ### Choose options
@@ -391,8 +435,8 @@ fluidPage(
   textInput("xypub.title","Chart title:",""),
   helpText("Download chart options:"),
   splitLayout(
-    textInput("xypub.savew","Width:","12"),
-    textInput("xypub.saveh","Height:","8"),
+    numericInput("xypub.savew","Width:",12),
+    numericInput("xypub.saveh","Height:",8),
     downloadButton("xypub.png","PNG"),
     downloadButton("xypub.svg","SVG")
   )
@@ -407,14 +451,14 @@ fluidPage(
   helpText("X-axis options:"),
   textInput("xypub.xlab","X-axis label:",""),
   splitLayout(
-    textInput("xypub.x1","X start:"),
-    textInput("xypub.x2","X end:")
+    numericInput("xypub.x1","X start:",NA),
+    numericInput("xypub.x2","X end:",NA)
   ),
   helpText("Y-axis options:"),
   textInput("xypub.ylab","Y-axis label:",""),
   splitLayout(
-    textInput("xypub.y1","Y start:"),
-    textInput("xypub.y2","Y end:")
+    numericInput("xypub.y1","Y start:",NA),
+    numericInput("xypub.y2","Y end:",NA)
   ),
   #splitLayout(
   #  textInput("xypub.y1b","Y2 start:"),
@@ -423,8 +467,8 @@ fluidPage(
   helpText("Horizontal line options:"),
   splitLayout(
     textInput("xyhline.col","Color:","None"),
-    textInput("xyhline.val","Position:","0"),
-    textInput("xyhline.size","Size:","0.8")
+    numericInput("xyhline.val","Position:",0),
+    numericInput("xyhline.size","Size:",0.8,step=.2)
   )
 )
 ```
@@ -450,26 +494,21 @@ xyline2 <- reactive(if(!is.null(imported.xy())) {
 })
 renderPlot(withProgress(message="Rendering...",xypub.graph()))
 xypub.graph <- reactive(if(!is.null(imported.xy())) {
-  xypub.y1 <- as.numeric(input$xypub.y1) #these are the x-y ranges
-  xypub.y2 <- as.numeric(input$xypub.y2)
-  #xypub.y1b <- as.numeric(input$xypub.y1b)
-  #xypub.y2b <- as.numeric(input$xypub.y2b)
-  xypub.x1 <- as.numeric(input$xypub.x1)
-  xypub.x2 <- as.numeric(input$xypub.x2)
   
-  if(!is.na(xypub.y1) & !is.na(xypub.y2) & !is.na(xypub.x1) & !is.na(xypub.x2)) {
-    gg <- xyline1() + coord_cartesian(xlim=c(xypub.x1,xypub.x2),ylim=c(xypub.y1,xypub.y2))
+  #these are the x-y limits
+  if(!is.na(input$xypub.y1) & !is.na(input$xypub.y2) & !is.na(input$xypub.x1) & !is.na(input$xypub.x2)) {
+    gg <- xyline1() + coord_cartesian(xlim=c(input$xypub.x1,input$xypub.x2),
+                                      ylim=c(input$xypub.y1,input$xypub.y2))
   } else gg <- xyline1()
   #if(input$xypub.both){
   #  if(!is.na(xypub.y1b) & !is.na(xypub.y2b) & !is.na(xypub.x1) & !is.na(xypub.x2)) {
   #    gg2 <- xyline2() + coord_cartesian(xlim=c(xypub.x1,xypub.x2),ylim=c(xypub.y1b,xypub.y2b))
   #  } else gg2 <- xyline2()
   #}
-      
   
   if(input$xyhline.col!="None" & input$xyhline.col!="none" & nchar(input$xyhline.col)){
-    gg <- gg + geom_hline(aes_(yintercept=as.numeric(input$xyhline.val)),linetype=2,
-                          color=input$xyhline.col,size=as.numeric(input$xyhline.size))
+    gg <- gg + geom_hline(aes_(yintercept=input$xyhline.val),linetype=2,
+                          color=input$xyhline.col,size=input$xyhline.size)
   }
   if(input$xypub.theme=="Default") gg <- gg + theme_gray(base_size=input$xypub.fsize)
   if(input$xypub.theme=="Minimal") gg <- gg + theme_bw(base_size=input$xypub.fsize)
@@ -488,14 +527,12 @@ xypub.graph <- reactive(if(!is.null(imported.xy())) {
 })
 output$xypub.png <- downloadHandler(paste('plot-', Sys.Date(), '.png', sep=''),
    content = function(file) if(!is.null(imported.xy())) {
-     ggsave(file,device="png",width=as.numeric(input$xypub.savew),
-            height=as.numeric(input$xypub.saveh))
+     ggsave(file,device="png",width=input$xypub.savew,height=input$xypub.saveh)
    }
 )
 output$xypub.svg <- downloadHandler(paste('plot-', Sys.Date(), '.svg', sep=''),
    content = function(file) if(!is.null(imported.xy())) {
-     ggsave(file,device="svg",width=as.numeric(input$xypub.savew),
-            height=as.numeric(input$xypub.saveh))
+     ggsave(file,device="svg",width=input$xypub.savew,height=input$xypub.saveh)
    }
 )
 ```
@@ -503,7 +540,7 @@ output$xypub.svg <- downloadHandler(paste('plot-', Sys.Date(), '.svg', sep=''),
 Explore {data-orientation=columns data-navmenu="Discrete"}
 =====================================
 
-Column {data-width=300 .tabset .tabset-fade}
+Column {data-width=250 .tabset .tabset-fade}
 -------------------------------------
     
 ### Choose options
@@ -520,10 +557,16 @@ output$varnames.xn <- renderUI({
 
 fluidPage(
   htmlOutput("varnames.yn"),
-  textInput("options.yv","Value of the known variable: (numeric, or type min/max)"),
+  splitLayout(
+    textInput("options.yv","Value of known variable:",
+            placeholder="Numeric, or min/max"),
+    numericInput("options.scalar","Scalar to multiply by:",1)
+  ),
+  
   htmlOutput("varnames.xn"),
   checkboxInput("avg","Average/SEM by type"),
   textInput("options.name","Name for this new variable:","Variable")
+  
 )
 ```
   
@@ -537,6 +580,9 @@ reduced <- reactive(if(!is.null(imported.filtered())){
   options.data <- tryCatch(reducer(options.data,options.name,
           input$options.yn,input$options.yv,input$options.xn),
           error=function(e) NULL)
+  if(input$options.scalar!=1 & !is.na(input$options.scalar)) {
+    options.data[,options.name] <- options.data[,options.name]*input$options.scalar
+  }
   if(input$avg & !is.null(options.data)) return(avgsem(options.data))
   options.data
 })
@@ -593,6 +639,11 @@ output$filter.step <- renderUI({
             tryCatch(max(imported.sorted()$Step[imported.sorted()$Step<=ceiling(quantile(
               imported.sorted()$Step,.99))]),error=function(e) 1),0,1)
 })
+output$filter.cycle <- renderUI({ 
+  sliderInput("filter.cycle","Is there a cycle to isolate? (0 for no)",0,
+              tryCatch(max(imported.sorted()$Cycle),
+                       error=function(e) 1),0,1,T)
+})
 
 fluidPage(column(12,div(
   style = "height:80px;",
@@ -601,14 +652,20 @@ fluidPage(column(12,div(
   htmlOutput("filter.amphours"),
   htmlOutput("filter.totaltime"),
   htmlOutput("filter.steptime"),
-  htmlOutput("filter.step")
+  htmlOutput("filter.step"),
+  htmlOutput("filter.cycle")
 )))
 
 #will perform calculations on this filtered dataset
 imported.filtered <- reactive(if(!is.null(imported())){
   if(is.null(input$filter.step)) return(imported())
-  x <- imported()
-  if(input$filter.step) x <- filter(imported(),Step==input$filter.step)
+  if(input$filter.cycle==0) x <- imported()
+  else { #baseline time stamp correction
+    x <- imported()[imported()$Cycle==input$filter.cycle,] %>%
+    within({Total.Time <- ave(Total.Time, Battery.ID, FUN=function(x) x-min(x))}) %>%
+    mutate(TimeHr=Total.Time/3600,TimeMin=Total.Time/60)
+  }
+  if(input$filter.step) x <- filter(x,Step==input$filter.step)
   tryCatch(filter(x,
          Voltage>=input$filter.voltage[1],Voltage<=input$filter.voltage[2],
          Current>=input$filter.current[1],Current<=input$filter.current[2],
@@ -696,7 +753,7 @@ renderDataTable(datatable(red.table(),
 Share {data-orientation=columns data-navmenu="Discrete"}
 =====================================
 
-Column {data-width=300 .tabset .tabset-fade}
+Column {data-width=250 .tabset .tabset-fade}
 -------------------------------------
     
 ### Choose options
@@ -712,8 +769,8 @@ fluidPage(
   textInput("pub.title","Chart title:",""),
   helpText("Download chart options:"),
   splitLayout(
-    textInput("pub.savew","Width:","12"),
-    textInput("pub.saveh","Height:","8"),
+    numericInput("pub.savew","Width:",12),
+    numericInput("pub.saveh","Height:",8),
     downloadButton("pub.png","PNG"),
     downloadButton("pub.svg","SVG")
   )
@@ -727,18 +784,18 @@ Customize discrete variable chart for sharing:
 fluidPage(
   helpText("Include axis ranges:"),
   splitLayout(
-    textInput("pub.x1","X start:"),
-    textInput("pub.x2","X end:")
+    numericInput("pub.x1","X start:",NA),
+    numericInput("pub.x2","X end:",NA)
   ),
   splitLayout(
-    textInput("pub.y1","Y start:"),
-    textInput("pub.y2","Y end:")
+    numericInput("pub.y1","Y start:",NA),
+    numericInput("pub.y2","Y end:",NA)
   ),
   helpText("Horizontal line options:"),
   splitLayout(
     textInput("hline.col","Color:","None"),
-    textInput("hline.val","Position:","0"),
-    textInput("hline.size","Size:","0.8")
+    numericInput("hline.val","Position:",0),
+    numericInput("hline.size","Size:",0.8,step=.2)
   ),
   checkboxInput("pub.rotatex","Rotate x-axis labels")
 )
@@ -751,25 +808,22 @@ Column {data-width=700}
 ```{r publish.graph}
 renderPlot(withProgress(message="Rendering...",pub.graph()))
 pub.graph <- reactive(if(!is.null(reduced())) {
-  pub.y1 <- as.numeric(input$pub.y1) #these are the x-y ranges
-  pub.y2 <- as.numeric(input$pub.y2)
-  pub.x1 <- as.numeric(input$pub.x1)
-  pub.x2 <- as.numeric(input$pub.x2)
   
   if(input$pub.type=="Bar"){
-    if(!is.na(pub.y1) & !is.na(pub.y2)){
-      gg <- bar() + coord_cartesian(ylim=c(pub.y1,pub.y2))
+    if(!is.na(input$pub.y1) & !is.na(input$pub.y2)){
+      gg <- bar() + coord_cartesian(ylim=c(input$pub.y1,input$pub.y2))
     } else gg <- bar()
   } 
   else { #line
-    if(!is.na(pub.y1) & !is.na(pub.y2) & !is.na(pub.x1) & !is.na(pub.x2)){
-         gg <- ggline() + coord_cartesian(xlim=c(pub.x1,pub.x2),ylim=c(pub.y1,pub.y2))
+    if(!is.na(input$pub.y1) & !is.na(input$pub.y2) & !is.na(input$pub.x1) & !is.na(input$pub.x2)){
+         gg <- ggline() + coord_cartesian(xlim=c(input$pub.x1,input$pub.x2),
+                                          ylim=c(input$pub.y1,input$pub.y2))
        } else gg <- ggline()
   }
   
   if(input$hline.col!="None" & input$hline.col!="none" & nchar(input$hline.col)){
-    gg <- gg + geom_hline(aes_(yintercept=as.numeric(input$hline.val)),linetype=2,
-                          color=input$hline.col,size=as.numeric(input$hline.size))
+    gg <- gg + geom_hline(aes_(yintercept=input$hline.val),linetype=2,
+                          color=input$hline.col,size=input$hline.size)
   }
   if(input$pub.theme=="Default") gg <- gg + theme_gray(base_size=input$pub.fsize)
   if(input$pub.theme=="Minimal") gg <- gg + theme_bw(base_size=input$pub.fsize)
@@ -787,14 +841,12 @@ pub.graph <- reactive(if(!is.null(reduced())) {
 })
 output$pub.png <- downloadHandler(paste('plot-', Sys.Date(), '.png', sep=''),
    content = function(file) if(!is.null(reduced())) {
-     ggsave(file,device="png",width=as.numeric(input$pub.savew),
-            height=as.numeric(input$pub.saveh))
+     ggsave(file,device="png",width=input$pub.savew,height=input$pub.saveh)
    }
 )
 output$pub.svg <- downloadHandler(paste('plot-', Sys.Date(), '.svg', sep=''),
    content = function(file) if(!is.null(reduced())) {
-     ggsave(file,device="svg",width=as.numeric(input$pub.savew),
-            height=as.numeric(input$pub.saveh))
+     ggsave(file,device="svg",width=input$pub.savew,height=input$pub.saveh)
    }
 )
 ```
