@@ -281,8 +281,10 @@ cols <- reactive({ #this is the color data, by type
 })
 cols.cast <- reactive({ #this is the color data, by ID
   if(!is.null(cols())){
-    suppressMessages(arrange(left_join(filter(labs(),Type!="skip"),
+    x <- suppressMessages(arrange(left_join(filter(labs(),Type!="skip"),
                                        cols()),Battery.ID))
+    x$Battery.ID <- gsub(" ?#[[:digit:]]+$","",x$Battery.ID)
+    x
   }
 })
 ```

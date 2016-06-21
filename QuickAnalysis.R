@@ -232,7 +232,7 @@ colorline <- function(dataset) {
     arrange(Battery.ID)
   #something is broken here, maybe use ave?
   spl <- split(dataset$Battery.ID,dataset$Type)
-  dataset$Line <- unsplit(sapply(spl,seq_along),dataset$Type)
+  dataset$Line <- unsplit(lapply(spl,seq_along),dataset$Type)
   dataset
 }
 
