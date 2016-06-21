@@ -36,7 +36,8 @@ Everything is live-updating and interactive, so you can change anything at any t
 ##Coming soon
 * A better name
 * Download interactive widgets as html files for easy sharing
-* Support for merging datasets automatically
+* Possible markdown report generation for reproducible research
+* Manual mode for graph creation
 * Add annotations to graphs
 * Recommendations tab to detect patterns and exceptions within the dataset
 * Always improving the underlying decision algorithms
