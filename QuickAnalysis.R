@@ -84,7 +84,6 @@ bigXL <- function(xl){ #worker function for big excel files
                  function(x) tryCatch(read_excel(xl,x,col_names = F),
                                       error=function(e) NULL))
     xl <- xl[!sapply(xl, is.null)]
-    print(str(xl))
     sheetnames <- excel_sheets(xlfile)[sapply(xl,ncol)==max(sapply(xl,ncol))]
     xl <- xl[sapply(xl,ncol)==max(sapply(xl,ncol))] #pick out the files with the most columns
   }
@@ -116,8 +115,8 @@ bigXL <- function(xl){ #worker function for big excel files
 dygraph.cast <- function(data, x,y,xlab=NULL,ylab=NULL,color=NULL,coloravg,group=NULL) {
   if(is.null(data)) return(NULL)
   if("Battery.ID" %in% colnames(data)){ #regular
-    casted <- dcast(data, as.formula(paste(x,"~Battery.ID")),mean,value.var=y)
     lines <- colorline(data) #figure out line pattern
+    casted <- dcast(data, as.formula(paste(x,"~Battery.ID")),mean,value.var=y)
     parsed <- mapply(function(x,y) paste0("%>% dySeries('",x,"',strokePattern=1:",y,")"),
                      lines$Battery.ID,lines$Line,SIMPLIFY=F)
     parsed <- paste(parsed, collapse = " ")
@@ -231,7 +230,7 @@ bargraph <- function(dataset, y, ylab){
 colorline <- function(dataset) {
   dataset <- dataset[!duplicated(dataset$Battery.ID),c("Type","Battery.ID")] %>%
     arrange(Battery.ID)
-  #something is broken here
+  #something is broken here, maybe use ave?
   spl <- split(dataset$Battery.ID,dataset$Type)
   dataset$Line <- unsplit(sapply(spl,seq_along),dataset$Type)
   dataset
@@ -285,6 +284,24 @@ as.monotonic <- function(x) {
   y <- diff0(x)
   y[y<0] <- min(y[y>0])
   cumsum(y) + 1 #or should it be min(x)?
+}
+
+#stitches together split datasets
+#ordering based on a #1 or #2 etc at the end of battery id
+seg.stitch <- function(x) {
+  if(any(grep("#",x$Battery.ID))) {
+    x$Battery.ID <- gsub(" ?#[[:digit:]]+$","",x$Battery.ID)
+    x$Total.Time <- ave(x$Total.Time,x$Battery.ID,FUN=function(y) {
+      if(!all(y==cummax(y))) y <- as.monotonic(y)
+      else y
+    })
+    x$Cycle <- ave(x$Cycle,x$Battery.ID,FUN=function(y) {
+      if(!all(y==cummax(y))) y <- as.monotonic(y)
+      else y
+    })
+    mutate(x,TimeMin=Total.Time/60, TimeHr=Total.Time/3600)
+  }
+  else x #no stitching necessary
 }
 
 #sort filename into ID and Type
@@ -442,4 +459,30 @@ theme_pub <- function (base_size = 12, base_family = "") {
       strip.background = element_rect(fill = "grey80", 
                                       colour = "grey50", 
                                       size = 0.2))
+}
+
+#cleans up legend names for plotly
+#need to rewrite to make better for boxplot
+ggplotly2 <- function(gg) {
+  if(is.null(gg)) return(ggplotly(ggplot()))
+  p <- plotly_build(gg)
+  x <- p$layout$annotations[[1]]$text
+  y <- p$layout$annotations[[2]]$text
+  for(n in 1:length(p$data[])){
+    name<-substr(p$data[[n]]$name,2,regexpr(",",p$data[[n]]$name)-1)
+    hover<-paste0("Battery: ",name,"<br>",x,": ",round(p$data[[n]]$x,digits=3),
+                  "<br>",y,": ",round(p$data[[n]]$y,digits=3))
+    p$data[[n]]$name <- name
+    p$data[[n]]$text <- hover
+  }
+  if(length(p$layout$annotations[[3]]$text)!=0){
+    y <- p$layout$annotations[[3]]$text
+    for(n in ((length(p$data[])/2)+1):length(p$data[])){
+      name<-p$data[[n]]$name
+      hover<-paste0("Battery: ",name,"<br>",x,": ",round(p$data[[n]]$x,digits=3),"<br>",y,": ",round(p$data[[n]]$y,digits=3))
+      p$data[[n]]$text <- hover
+    }
+  }
+  p %>%
+    config(displayModeBar = F)
 }

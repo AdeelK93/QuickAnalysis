@@ -103,18 +103,18 @@ output$totaltime <- renderUI({
 totaltime.sorted <- reactive(if(!is.null(imported.orig())) {
   x <- rowMeans(imported.orig()[input$totaltime],na.rm=T)
   if(min(x[x>0],na.rm=T)<0.05) { #time in days?
-    x <- unlist(tapply(x,imported.orig()$Filename,function(x) {
+    x <- ave(x,imported.orig()$Filename,FUN=function(x) {
       #only modify files with time reporting in days
       if(min(x[x>0],na.rm=T)<0.01) x*24*3600
       else x
-    }))
+    })
   }
   if(sum(is.na(x))) return(x)
   #verify that data is monotonic
-  x <- unlist(tapply(x,imported.orig()$Filename,function(x) {
-      if(!all(x==cummax(x))) x <- as.monotonic(x) #nonmonotonic
-      else x
-    }))
+  x <- ave(x,imported.orig()$Filename,FUN=function(y) {
+      if(!all(y==cummax(y))) y <- as.monotonic(y) #nonmonotonic
+      else y
+    })
   x
 })
 output$steptime <- renderUI({ 
@@ -124,11 +124,11 @@ output$steptime <- renderUI({
 steptime.sorted <- reactive(if(!is.null(imported.orig())) {
   x <- rowMeans(imported.orig()[input$steptime],na.rm=T)
   if(min(x[x>0],na.rm=T)<0.05) { #time in days?
-    x <- unlist(tapply(x,imported.orig()$Filename,function(x) {
+    x <- ave(x,imported.orig()$Filename,FUN=function(x) {
       #only modify files with time reporting in days
       if(min(x[x>0],na.rm=T)<0.01) x*24*3600
       else x
-    }))
+    })
   }
   x
 })
@@ -147,10 +147,10 @@ cycle.sorted <- reactive(if(!is.null(imported.orig())) {
   x <- rowMeans(imported.orig()[input$cycle],na.rm=T)
   if(sum(is.na(x))) return(x)
   #verify that data is monotonic
-  x <- unlist(tapply(x,imported.orig()$Filename,function(x) {
-      if(!all(x==cummax(x))) x <- as.monotonic(x) #nonmonotonic
-      else x
-    }))
+  x <- ave(x,imported.orig()$Filename,FUN=function(y) {
+      if(!all(y==cummax(y))) y <- as.monotonic(y) #nonmonotonic
+      else y
+    })
   x
 })
 
@@ -193,8 +193,10 @@ imported <- reactive({ #this is the final sorted dataset to be used by analytica
   if(is.null(imported.sorted())) return(NULL)
   x <- select(imported.sorted(), -Type, -Battery.ID)
   suppressMessages(left_join(x,labs())) %>%
-  mutate(Type=as.factor(Type),Battery.ID=as.factor(Battery.ID)) %>%
-  filter(Type!="skip")
+    arrange(Type,Battery.ID) %>%
+    seg.stitch() %>%
+    mutate(Type=as.factor(Type),Battery.ID=as.factor(Battery.ID)) %>%
+    filter(Type!="skip")
 })
 ```
 
@@ -328,6 +330,14 @@ imported.xy <- reactive(if(!is.null(imported())) {
   return(x)
 })
 
+#remove filtered out colors
+xy.cols <- reactive(if(!is.null(imported.xy())) {
+  cols()$Color[cols()$Type %in% imported.xy()$Type]
+})
+xy.cols.cast <- reactive(if(!is.null(imported.xy())) {
+  cols.cast()$Color[cols.cast()$Battery.ID %in% imported.xy()$Battery.ID]
+})
+
 output$top.yn <- renderUI({ 
 selectInput("top.yn","Top y-axis:",graphnames(),"Current")
   })
@@ -403,7 +413,7 @@ Column
 renderDygraph(withProgress(
   message="Rendering plot...",
   dygraph.cast(imported.xy(),input$bottom.xn,input$top.yn,input$bottom.xn,
-               input$top.yn,cols.cast()$Color,cols()$Color,group="brc")
+               input$top.yn,xy.cols.cast(),xy.cols(),group="brc")
 ))
 ```
 
@@ -412,7 +422,7 @@ renderDygraph(withProgress(
 renderDygraph(withProgress(
   message="Rendering plot...",
   dygraph.cast(imported.xy(),input$bottom.xn,input$bottom.yn,input$bottom.xn,
-               input$bottom.yn,cols.cast()$Color,cols()$Color,group="brc")
+               input$bottom.yn,xy.cols.cast(),xy.cols(),group="brc")
 ))
 ```
 
@@ -479,17 +489,10 @@ Column {data-width=700}
 ### Graph {.no-title}
 ```{r xypublish.graph}
 xyline1 <- reactive(if(!is.null(imported.xy())) {
-  gg <- linegraph(imported.xy(),input$bottom.xn,input$top.yn) + 
-    scale_fill_manual(values=cols.cast()$Color,name="")
-  if(input$xy.avg) gg <- gg + scale_color_manual(values=cols()$Color,name="") #avg/sem
-  else gg <- gg + scale_color_manual(values=cols.cast()$Color,name="") #regular
-  gg
-})
-xyline2 <- reactive(if(!is.null(imported.xy())) {
-  gg <- linegraph(imported.xy(),input$bottom.xn,input$bottom.yn) + 
-    scale_fill_manual(values=cols.cast()$Color,name="")
-  if(input$xy.avg) gg <- gg + scale_color_manual(values=cols()$Color,name="") #avg/sem
-  else gg <- gg + scale_color_manual(values=cols.cast()$Color,name="") #regular
+  gg <- linegraph(imported.xy(),input$bottom.xn,input$top.yn) #avg/sem
+  if(input$xy.avg) gg <- gg + scale_color_manual(values=xy.cols(),name="") +
+    scale_fill_manual(values=xy.cols(),name="")
+  else gg <- gg + scale_color_manual(values=xy.cols.cast(),name="") #regular
   gg
 })
 renderPlot(withProgress(message="Rendering...",xypub.graph()))
@@ -584,6 +587,14 @@ reduced <- reactive(if(!is.null(imported.filtered())){
   }
   if(input$avg & !is.null(options.data)) return(avgsem(options.data))
   options.data
+})
+
+#remove filtered out colors
+reduced.cols <- reactive(if(!is.null(reduced())) {
+  cols()$Color[cols()$Type %in% reduced()$Type]
+})
+reduced.cols.cast <- reactive(if(!is.null(reduced())) {
+  cols.cast()$Color[cols.cast()$Battery.ID %in% reduced()$Battery.ID]
 })
 
 wide <- reactive({
@@ -701,15 +712,15 @@ Column {data-width=700 .tabset .tabset-fade}
 ```{r graph}
 #ticker<-function(x) paste0("`",x,"`")
 bar <- reactive(if(!is.null(reduced())) bargraph(reduced(),options.name,
-        options.name.orig)+scale_fill_manual(values=cols()$Color,name=""))
+        options.name.orig)+scale_fill_manual(values=reduced.cols(),name=""))
 line <- reactive(if(!is.null(reduced())) dygraph.cast(reduced(),
         "Cycle",options.name,"Cycle",options.name.orig,
-        cols.cast()$Color,cols()$Color))
+        reduced.cols.cast(),reduced.cols()))
 ggline <- reactive(if(!is.null(reduced())) {
-  gg <- linegraph(reduced(),"Cycle",options.name)+ylab(options.name.orig) +
-    scale_fill_manual(values=cols()$Color,name="")
-  if(input$avg) gg <- gg + scale_color_manual(values=cols()$Color,name="") #avg/sem
-  else gg <- gg + scale_color_manual(values=cols.cast()$Color,name="") #regular
+  gg <- linegraph(reduced(),"Cycle",options.name)+ylab(options.name.orig) #avg/sem
+  if(input$avg) gg <- gg + scale_color_manual(values=reduced.cols(),name="") +
+    scale_fill_manual(values=reduced.cols(),name="")
+  else gg <- gg + scale_color_manual(values=reduced.cols.cast(),name="") #regular
   gg
 })
 
@@ -726,8 +737,7 @@ shinyApp(
       )
   ),
   server = function(input, output, session){
-    output$bar <- renderPlotly(withProgress(message="Calculating...",tryCatch(ggplotly(bar()) %>%
-          config(displayModeBar = F),error=function(e) ggplotly(ggplot()))))
+    output$bar <- renderPlotly(withProgress(message="Calculating...",ggplotly2(bar())))
     output$line <- renderDygraph(withProgress(message="Calculating...",line()))
   }
 )

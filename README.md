@@ -7,6 +7,7 @@ Everything is live-updating and interactive, so you can change anything at any t
 
 ###Import
 * Import heterogenous datasets from a variety of file types, formats, and structures
+* Stitch together files by giving them the same Battery ID and appending a #1 or #2 etc. at the end
 * Automatically identify and standardize time stamps across data sources
 * Merge dissimilar column names using an interactive heatmap and diagnostic tools
 * Datasets are automatically sorted by type and ID, and can be easily changed at any time
