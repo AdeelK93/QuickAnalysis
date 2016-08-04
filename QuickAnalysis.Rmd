@@ -102,10 +102,10 @@ output$totaltime <- renderUI({
 })
 totaltime.sorted <- reactive(if(!is.null(imported.orig())) {
   x <- rowMeans(imported.orig()[input$totaltime],na.rm=T)
-  if(min(x[x>0],na.rm=T)<0.05) { #time in days?
+  if(min(x[x>0.00001],na.rm=T)<0.05) { #time in days?
     x <- ave(x,imported.orig()$Filename,FUN=function(x) {
       #only modify files with time reporting in days
-      if(min(x[x>0],na.rm=T)<0.01) x*24*3600
+      if(min(x[x>0.00001],na.rm=T)<0.01) x*24*3600
       else x
     })
   }
@@ -123,10 +123,10 @@ output$steptime <- renderUI({
 })
 steptime.sorted <- reactive(if(!is.null(imported.orig())) {
   x <- rowMeans(imported.orig()[input$steptime],na.rm=T)
-  if(min(x[x>0],na.rm=T)<0.05) { #time in days?
+  if(min(x[x>0.00001],na.rm=T)<0.05) { #time in days?
     x <- ave(x,imported.orig()$Filename,FUN=function(x) {
       #only modify files with time reporting in days
-      if(min(x[x>0],na.rm=T)<0.01) x*24*3600
+      if(min(x[x>0.00001],na.rm=T)<0.01) x*24*3600
       else x
     })
   }

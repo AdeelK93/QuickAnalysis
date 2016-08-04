@@ -80,11 +80,13 @@ bigXL <- function(xl){ #worker function for big excel files
     sheets.orig <- grep("Channel(?!_Chart)",sheets.orig,perl=T)-1
     xl <- lapply(sheets.orig,read_excel,path=xl,col_names = F)
   } else {
-    xl <- lapply(sheets.orig,
+    #remove global info to better handle Arbin data
+    xl <- lapply(sheets.orig[sheets.orig!="Global_Info"],
                  function(x) tryCatch(read_excel(xl,x,col_names = F),
                                       error=function(e) NULL))
     xl <- xl[!sapply(xl, is.null)]
-    sheetnames <- excel_sheets(xlfile)[sapply(xl,ncol)==max(sapply(xl,ncol))]
+    sheetnames <- sheets.orig[sheets.orig!="Global_Info"][sapply(xl,ncol)==max(sapply(xl,ncol))]
+    print(sheetnames)
     xl <- xl[sapply(xl,ncol)==max(sapply(xl,ncol))] #pick out the files with the most columns
   }
   
