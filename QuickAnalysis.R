@@ -86,7 +86,6 @@ bigXL <- function(xl){ #worker function for big excel files
                                       error=function(e) NULL))
     xl <- xl[!sapply(xl, is.null)]
     sheetnames <- sheets.orig[sheets.orig!="Global_Info"][sapply(xl,ncol)==max(sapply(xl,ncol))]
-    print(sheetnames)
     xl <- xl[sapply(xl,ncol)==max(sapply(xl,ncol))] #pick out the files with the most columns
   }
   
